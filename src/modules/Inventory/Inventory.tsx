@@ -79,7 +79,10 @@ export const Inventory: React.FC = () => {
   };
 
   // Calculations
-  const totalValue = inventory.reduce((sum, item) => sum + (item.remaining_qty * item.price), 0);
+  const totalValue = inventory.reduce((sum, item) => {
+    const perUnit = item.purchased_qty > 0 ? item.price / item.purchased_qty : 0;
+    return sum + item.remaining_qty * perUnit;
+  }, 0);
   const lowStockCount = inventory.filter(item => item.remaining_qty <= item.low_stock_threshold).length;
 
   // Filter products list
@@ -173,10 +176,11 @@ export const Inventory: React.FC = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Brand / Manufacturer</label>
+                <label className="text-slate-500 dark:text-slate-400">
+                  Brand / Manufacturer <span className="text-slate-400/60 font-normal">(optional)</span>
+                </label>
                 <input
                   type="text"
-                  required
                   placeholder="e.g. YaraLiva"
                   value={formData.brand}
                   onChange={(e) => setFormData({...formData, brand: e.target.value})}
@@ -240,13 +244,13 @@ export const Inventory: React.FC = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Price / Unit ($)</label>
+                <label className="text-slate-500 dark:text-slate-400">Total Purchase Price (₹)</label>
                 <input
                   type="number"
                   required
-                  min="0.001"
+                  min="0.01"
                   step="any"
-                  placeholder="e.g. 1.80"
+                  placeholder="e.g. 5000 for 100 kg purchased"
                   value={formData.price}
                   onChange={(e) => setFormData({...formData, price: e.target.value})}
                   className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
@@ -385,9 +389,10 @@ export const Inventory: React.FC = () => {
                   {/* Bottom: Pricing details & Actions */}
                   <div className="border-t border-slate-200/25 dark:border-slate-800/10 pt-3 flex justify-between items-center text-xs">
                     <div>
-                      <span className="text-[9px] text-slate-400 block uppercase font-bold">Asset Cost</span>
+                      <span className="text-[9px] text-slate-400 block uppercase font-bold">Cost / {item.unit}</span>
                       <span className="font-extrabold text-slate-700 dark:text-slate-200 font-heading">
-                        ₹{item.price} <span className="text-[9px] font-normal text-slate-400">/ {item.unit}</span>
+                        ₹{item.purchased_qty > 0 ? (item.price / item.purchased_qty).toFixed(2) : '—'}
+                        <span className="text-[9px] font-normal text-slate-400"> / {item.unit}</span>
                       </span>
                     </div>
 

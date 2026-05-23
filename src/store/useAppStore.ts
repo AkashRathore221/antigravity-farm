@@ -296,7 +296,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     let finalExpenses = expenses;
 
     if (activeCropId) {
-      const totalCost = newItem.purchased_qty * newItem.price;
+      const totalCost = newItem.price; // price field now stores total purchase price
       const newExpense: Expense = {
         id: newId('exp'), tenant_id: 'tenant-1', crop_id: activeCropId,
         date: newItem.purchase_date, category: 'inventory',
@@ -341,7 +341,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (logData.inventory_id) {
       const invItem = inventory.find(i => i.id === logData.inventory_id);
       if (invItem) {
-        calculatedCost = parseFloat((logData.quantity_used * invItem.price).toFixed(2));
+        const perUnitCost = invItem.purchased_qty > 0 ? invItem.price / invItem.purchased_qty : 0;
+        calculatedCost = parseFloat((logData.quantity_used * perUnitCost).toFixed(2));
         inventoryItemName = `${invItem.name} (${invItem.brand})`;
         updatedInventory = inventory.map(i =>
           i.id === logData.inventory_id
