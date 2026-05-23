@@ -68,6 +68,7 @@ interface AppState {
 
   // Weather
   addWeatherLog: (weatherData: Omit<WeatherLog, 'id' | 'tenant_id' | 'created_at'>) => void;
+  deleteWeatherLog: (id: string) => void;
 
   // Settings
   updateSettings: (updates: Partial<AppSettings>) => void;
@@ -495,6 +496,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ weatherLogs: updatedLogs, syncQueue: newQueue });
     saveLocal(get());
     bgUpsert('weather_logs', newLog, authUser?.id);
+  },
+
+  deleteWeatherLog: (id) => {
+    const { weatherLogs, authUser } = get();
+    const updated = weatherLogs.filter(l => l.id !== id);
+    set({ weatherLogs: updated });
+    saveLocal(get());
+    bgDelete('weather_logs', id, authUser?.id);
   },
 
   // ── Settings ─────────────────────────────────────────────────────────────────

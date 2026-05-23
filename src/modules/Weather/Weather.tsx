@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import {
   CloudSun, Navigation, MapPin, Cloud, CloudRain, Sun, Wind,
-  Droplets, RefreshCw, AlertTriangle, Calendar, Thermometer
+  Droplets, RefreshCw, AlertTriangle, Calendar, Thermometer, Trash2
 } from 'lucide-react';
 
 interface GeoResult {
@@ -84,7 +84,7 @@ function getDayLabel(daysFromNow: number): string {
 }
 
 export const Weather: React.FC = () => {
-  const { weatherLogs, addWeatherLog } = useAppStore();
+  const { weatherLogs, addWeatherLog, deleteWeatherLog } = useAppStore();
 
   const [gpsLoading, setGpsLoading] = useState(false);
   const [apiLoading, setApiLoading] = useState(false);
@@ -453,6 +453,7 @@ export const Weather: React.FC = () => {
                   <th className="py-2.5">Wind</th>
                   <th className="py-2.5">Rain</th>
                   <th className="py-2.5">AQI / UV</th>
+                  <th className="py-2.5"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200/10 text-slate-700 dark:text-slate-350">
@@ -478,6 +479,15 @@ export const Weather: React.FC = () => {
                       <td className="py-3">{log.wind} km/h</td>
                       <td className="py-3">{log.rainfall} mm</td>
                       <td className="py-3">{log.aqi} AQI &bull; {log.uv_index} UV</td>
+                      <td className="py-3">
+                        <button
+                          onClick={() => deleteWeatherLog(log.id)}
+                          className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-500/10 transition-all"
+                          title="Delete this log entry"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
