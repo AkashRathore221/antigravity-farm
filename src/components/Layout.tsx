@@ -238,7 +238,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
         </header>
 
         {/* HEADER DESKTOP - Optional Premium Dashboard Breadcrumb */}
-        <header className="hidden lg:flex items-center justify-between px-8 py-4 bg-transparent sticky top-0 z-10">
+        <header className="hidden lg:flex items-center justify-between px-8 py-4 bg-transparent">
           <div>
             <h2 className="text-2xl font-bold font-heading text-slate-800 dark:text-slate-100">
               {navItems.find(n => n.id === activeTab)?.label}
