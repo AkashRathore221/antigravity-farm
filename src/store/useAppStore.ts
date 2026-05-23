@@ -198,7 +198,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   signOut: async () => {
     await supabase.auth.signOut();
-    set({ authUser: null, crops: [], inventory: [], usageLogs: [], harvests: [], expenses: [], weatherLogs: [], activeCropId: null });
+    set({ authUser: null, crops: [], inventory: [], usageLogs: [], harvests: [], expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [] });
     localStorage.removeItem(LS_KEY);
   },
 
@@ -219,11 +219,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         data.crops.length + data.inventory.length + data.usageLogs.length +
         data.harvests.length + data.expenses.length + data.weatherLogs.length;
 
-      if (syncQueue.length > 0) {
-        // Local has pending changes not yet confirmed in Supabase (bgUpsert may have failed
-        // or the page was refreshed before the in-flight request completed).
-        // Local is authoritative here — push everything up. Do NOT overwrite local with
-        // stale Supabase data, which would lose the pending entries.
+      const localState = get();
+      const localTotal =
+        (localState.crops?.length ?? 0) + (localState.inventory?.length ?? 0) +
+        (localState.usageLogs?.length ?? 0) + (localState.harvests?.length ?? 0) +
+        (localState.expenses?.length ?? 0) + (localState.weatherLogs?.length ?? 0);
+
+      if (syncQueue.length > 0 && localTotal > 0) {
+        // Local has pending changes AND actual data — local is authoritative.
+        // Push everything up. Do NOT overwrite local with stale Supabase data.
         const ok = await pushAllLocalToSupabase(get());
         if (ok) {
           set({ syncQueue: [] });
@@ -231,7 +235,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         // If push failed: leave syncQueue intact so the next refresh retries automatically.
       } else if (cloudTotal > 0) {
-        // No pending local changes and Supabase has records — safe to use as canonical source.
+        // Supabase has records and local has nothing pending (or local is empty after logout).
+        // Use Supabase as canonical source.
         const activeCropId = data.crops.find(c => c.status === 'active')?.id ?? null;
         set({
           crops: data.crops,
