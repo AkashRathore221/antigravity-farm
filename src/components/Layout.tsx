@@ -13,12 +13,8 @@ interface LayoutProps {
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab }) => {
-  const { settings, isOnline, syncQueue, initializeStore, authUser, signOut, pullFromSupabase, isSyncing } = useAppStore();
+  const { settings, isOnline, syncQueue, authUser, signOut, pullFromSupabase, isSyncing } = useAppStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  useEffect(() => {
-    initializeStore();
-  }, [initializeStore]);
 
   // Handle auto-sync indicators on online status changes
   useEffect(() => {

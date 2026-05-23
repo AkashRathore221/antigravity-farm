@@ -125,8 +125,10 @@ function bgDelete(table: string, id: string, userId: string | undefined) {
   });
 }
 
-// Recovery path: push all local records to Supabase when bgUpsert previously failed silently
-async function pushAllLocalToSupabase(state: Partial<AppState>, userId: string) {
+// Recovery path: push all local records to Supabase when bgUpsert previously failed silently.
+// Returns true only if every upsert succeeded — caller should only clear syncQueue on true.
+async function pushAllLocalToSupabase(state: Partial<AppState>, userId: string): Promise<boolean> {
+  let allOk = true;
   const tables: Array<{ name: string; rows: unknown[] }> = [
     { name: 'crops',        rows: state.crops        ?? [] },
     { name: 'inventory',    rows: state.inventory     ?? [] },
@@ -138,12 +140,14 @@ async function pushAllLocalToSupabase(state: Partial<AppState>, userId: string) 
   await Promise.all(
     tables.flatMap(({ name, rows }) =>
       rows.map(row =>
-        Promise.resolve(upsertRow(name, row as Record<string, unknown>, userId)).catch(e =>
-          console.error(`[Sync] Recovery upsert failed for ${name}:`, e)
-        )
+        Promise.resolve(upsertRow(name, row as Record<string, unknown>, userId)).catch(e => {
+          console.error(`[Sync] Recovery upsert failed for ${name}:`, e);
+          allOk = false;
+        })
       )
     )
   );
+  return allOk;
 }
 
 // ─── Store ─────────────────────────────────────────────────────────────────────
@@ -211,8 +215,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         data.crops.length + data.inventory.length + data.usageLogs.length +
         data.harvests.length + data.expenses.length + data.weatherLogs.length;
 
-      if (cloudTotal > 0) {
-        // Supabase has records — use as canonical source
+      if (syncQueue.length > 0) {
+        // Local has pending changes not yet confirmed in Supabase (bgUpsert may have failed
+        // or the page was refreshed before the in-flight request completed).
+        // Local is authoritative here — push everything up. Do NOT overwrite local with
+        // stale Supabase data, which would lose the pending entries.
+        const ok = await pushAllLocalToSupabase(get(), authUser.id);
+        if (ok) {
+          set({ syncQueue: [] });
+          saveLocal(get());
+        }
+        // If push failed: leave syncQueue intact so the next refresh retries automatically.
+      } else if (cloudTotal > 0) {
+        // No pending local changes and Supabase has records — safe to use as canonical source.
         const activeCropId = data.crops.find(c => c.status === 'active')?.id ?? null;
         set({
           crops: data.crops,
@@ -225,14 +240,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           syncQueue: [],
         });
         saveLocal(get());
-      } else if (syncQueue.length > 0) {
-        // Supabase empty but local has pending changes — bgUpsert likely failed earlier.
-        // Push all local state to Supabase as recovery, then clear the queue.
-        await pushAllLocalToSupabase(get(), authUser.id);
-        set({ syncQueue: [] });
-        saveLocal(get());
       }
-      // Supabase empty + no syncQueue = brand-new user or mock-only state; leave local untouched
+      // Both empty: new user or mock-only state — leave local untouched.
     } catch (err) {
       console.error('[Sync] pullFromSupabase threw:', err);
     } finally {
