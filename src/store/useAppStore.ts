@@ -129,27 +129,28 @@ function bgDelete(table: string, id: string, userId: string | undefined) {
 
 // Recovery path: push all local records to Supabase when bgUpsert previously failed silently.
 // Returns true only if every upsert succeeded — caller should only clear syncQueue on true.
-// upsertRow fetches the active session itself, so no userId parameter is needed here.
+// Tables are processed in FK dependency order (crops/inventory first, then referencing tables)
+// so expenses/usage_logs never try to insert before their crop_id FK target exists.
 async function pushAllLocalToSupabase(state: Partial<AppState>): Promise<boolean> {
   let allOk = true;
-  const tables: Array<{ name: string; rows: unknown[] }> = [
+  const orderedTables: Array<{ name: string; rows: unknown[] }> = [
     { name: 'crops',        rows: state.crops        ?? [] },
     { name: 'inventory',    rows: state.inventory     ?? [] },
+    { name: 'weather_logs', rows: state.weatherLogs   ?? [] },
     { name: 'usage_logs',   rows: state.usageLogs     ?? [] },
     { name: 'harvests',     rows: state.harvests      ?? [] },
     { name: 'expenses',     rows: state.expenses      ?? [] },
-    { name: 'weather_logs', rows: state.weatherLogs   ?? [] },
   ];
-  await Promise.all(
-    tables.flatMap(({ name, rows }) =>
+  for (const { name, rows } of orderedTables) {
+    await Promise.all(
       rows.map(row =>
         upsertRow(name, row as Record<string, unknown>).catch(e => {
           console.error(`[Sync] Recovery upsert failed for ${name}:`, e);
           allOk = false;
         })
       )
-    )
-  );
+    );
+  }
   return allOk;
 }
 
