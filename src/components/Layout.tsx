@@ -3,7 +3,7 @@ import { useAppStore } from '../store/useAppStore';
 import {
   LayoutDashboard, Sprout, Boxes, ClipboardList, TrendingUp,
   Receipt, CloudSun, BarChart3, FileSpreadsheet, BookOpen,
-  Settings, Sun, Moon, Wifi, WifiOff, RefreshCw, Menu, X, LogOut, User
+  Settings, Wifi, WifiOff, RefreshCw, Menu, X, LogOut, User
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -14,25 +14,11 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab }) => {
   const { settings, isOnline, syncQueue, initializeStore, authUser, signOut, pullFromSupabase, isSyncing } = useAppStore();
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem('theme');
-    return saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     initializeStore();
   }, [initializeStore]);
-
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    }
-  }, [darkMode]);
 
   // Handle auto-sync indicators on online status changes
   useEffect(() => {
@@ -145,13 +131,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
             </div>
           )}
 
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-100/40 dark:bg-slate-900/40 hover:bg-slate-100/80 dark:hover:bg-slate-900/80 border border-slate-200/30 dark:border-slate-800/30 rounded-xl transition-all"
-          >
-            <span>Appearance</span>
-            {darkMode ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-indigo-400" />}
-          </button>
         </div>
       </aside>
 
@@ -191,15 +170,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
                 );
               })}
             </nav>
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-2">
-              <button
-                onClick={() => setDarkMode(!darkMode)}
-                className="w-full flex items-center justify-between p-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-900"
-              >
-                <span>{darkMode ? 'Light Theme' : 'Dark Theme'}</span>
-                {darkMode ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-indigo-400" />}
-              </button>
-            </div>
           </aside>
         </div>
       )}

@@ -1,17 +1,9 @@
 import React, { useState, useCallback } from 'react';
 import { useAppStore } from '../../store/useAppStore';
-import { CloudSun, Navigation, MapPin, PlusCircle, Cloud, CloudRain, Sun, Wind, Droplets, RefreshCw, AlertTriangle, Calendar } from 'lucide-react';
-
-interface ForecastDay {
-  day: string;
-  tempMax: string;
-  tempMin: string;
-  humidity: string;
-  rain: string;
-  wind: string;
-  desc: string;
-  code: number;
-}
+import {
+  CloudSun, Navigation, MapPin, Cloud, CloudRain, Sun, Wind,
+  Droplets, RefreshCw, AlertTriangle, Calendar, Thermometer
+} from 'lucide-react';
 
 interface GeoResult {
   name: string;
@@ -19,6 +11,45 @@ interface GeoResult {
   latitude: number;
   longitude: number;
   admin1?: string;
+}
+
+interface ForecastDay {
+  day: string;
+  tempMax: string;
+  tempMin: string;
+  rain: string;
+  code: number;
+}
+
+interface TodayWeather {
+  temp: number;
+  tempMax: number;
+  tempMin: number;
+  tempMaxTime: string;
+  tempMinTime: string;
+  humidity: number;
+  rainfall: number;
+  wind: number;
+  uvIndex: number;
+  dewPoint: number;
+  vpd: number;
+  weatherCode: number;
+  sunrise: string;
+  sunset: string;
+  desc: string;
+}
+
+function calcVpd(tempC: number, rh: number): number {
+  const es = 0.6108 * Math.exp(17.27 * tempC / (tempC + 237.3));
+  return parseFloat((es * (1 - rh / 100)).toFixed(2));
+}
+
+function fmtIsoTime(isoStr: string): string {
+  const timePart = (isoStr ?? '00:00').split('T')[1] ?? '00:00';
+  const [hh, mm] = timePart.split(':').map(Number);
+  const ampm = hh >= 12 ? 'PM' : 'AM';
+  const h12 = hh % 12 || 12;
+  return `${h12}:${mm.toString().padStart(2, '0')} ${ampm}`;
 }
 
 function wmoCodeToDesc(code: number): string {
@@ -34,9 +65,22 @@ function wmoCodeToDesc(code: number): string {
 
 function ForecastIcon({ code, size = 24 }: { code: number; size?: number }) {
   if (code === 0) return <Sun size={size} className="text-amber-400" />;
-  if (code <= 3) return <CloudSun size={size} className="text-emerald-400" />;
-  if (code <= 67) return <CloudRain size={size} className="text-sky-400" />;
+  if (code <= 3) return <CloudSun size={size} className="text-sky-400" />;
+  if (code <= 67) return <CloudRain size={size} className="text-blue-400" />;
   return <Cloud size={size} className="text-slate-400" />;
+}
+
+function vpdStatus(vpd: number): { text: string; color: string } {
+  if (vpd < 0.4) return { text: 'Too Humid', color: 'text-blue-500' };
+  if (vpd < 1.0) return { text: 'Fungal Risk', color: 'text-amber-500' };
+  if (vpd <= 1.6) return { text: 'Optimal', color: 'text-emerald-500' };
+  return { text: 'Stomata Stress', color: 'text-red-500' };
+}
+
+function getDayLabel(daysFromNow: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + daysFromNow);
+  return d.toLocaleDateString([], { weekday: 'short', day: 'numeric' });
 }
 
 export const Weather: React.FC = () => {
@@ -48,71 +92,73 @@ export const Weather: React.FC = () => {
   const [locationName, setLocationName] = useState('');
   const [activeCoords, setActiveCoords] = useState({ lat: 0, lon: 0 });
   const [hasCoords, setHasCoords] = useState(false);
+  const [todayWeather, setTodayWeather] = useState<TodayWeather | null>(null);
   const [forecast, setForecast] = useState<ForecastDay[]>([]);
-  const [showAddForm, setShowAddForm] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<GeoResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-
-  const [formData, setFormData] = useState({
-    date: new Date().toISOString().split('T')[0],
-    temp: '29.5',
-    humidity: '65',
-    rainfall: '0',
-    wind: '12',
-    aqi: '65',
-    uv_index: '8',
-    sunrise: '05:45 AM',
-    sunset: '06:50 PM',
-    dew_point: '21.5'
-  });
+  const [loggedNow, setLoggedNow] = useState(false);
 
   const fetchWeather = useCallback(async (lat: number, lon: number) => {
     setApiLoading(true);
     setApiError(null);
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,uv_index,dew_point_2m&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,sunrise,sunset,uv_index_max,weather_code&timezone=auto&forecast_days=4`;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+        `&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,uv_index,dew_point_2m` +
+        `&hourly=temperature_2m` +
+        `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,sunrise,sunset,uv_index_max,weather_code` +
+        `&timezone=auto&forecast_days=8`;
+
       const res = await fetch(url);
       if (!res.ok) throw new Error(`API error ${res.status}`);
       const data = await res.json();
 
-      const cur = data.current;
-      const daily = data.daily;
+      const cur = data.current as Record<string, number>;
+      const daily = data.daily as Record<string, unknown[]>;
+      const hourly = data.hourly as { temperature_2m: number[]; time: string[] };
 
-      // Format sunrise/sunset
-      const sunriseStr = daily.sunrise?.[0]
-        ? new Date(daily.sunrise[0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : '05:45 AM';
-      const sunsetStr = daily.sunset?.[0]
-        ? new Date(daily.sunset[0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : '06:50 PM';
+      // Find today's hourly max/min from first 24 values
+      const todayTemps = hourly.temperature_2m.slice(0, 24);
+      const maxTemp = Math.max(...todayTemps);
+      const minTemp = Math.min(...todayTemps);
+      const maxIdx = todayTemps.indexOf(maxTemp);
+      const minIdx = todayTemps.indexOf(minTemp);
+      const tempMaxTime = fmtIsoTime(hourly.time[maxIdx] ?? '12:00');
+      const tempMinTime = fmtIsoTime(hourly.time[minIdx] ?? '06:00');
 
-      setFormData(prev => ({
-        ...prev,
-        temp: (cur.temperature_2m ?? prev.temp).toString(),
-        humidity: (cur.relative_humidity_2m ?? prev.humidity).toString(),
-        rainfall: (cur.precipitation ?? 0).toString(),
-        wind: (cur.wind_speed_10m ?? prev.wind).toString(),
-        uv_index: (cur.uv_index ?? prev.uv_index).toString(),
-        dew_point: (cur.dew_point_2m ?? prev.dew_point).toString(),
+      const sunriseStr = daily.sunrise?.[0] ? fmtIsoTime(daily.sunrise[0] as string) : '05:45 AM';
+      const sunsetStr = daily.sunset?.[0] ? fmtIsoTime(daily.sunset[0] as string) : '06:50 PM';
+      const vpd = calcVpd(cur.temperature_2m, cur.relative_humidity_2m);
+
+      setTodayWeather({
+        temp: parseFloat((cur.temperature_2m ?? 0).toFixed(1)),
+        tempMax: parseFloat(((daily.temperature_2m_max?.[0] as number) ?? maxTemp).toFixed(1)),
+        tempMin: parseFloat(((daily.temperature_2m_min?.[0] as number) ?? minTemp).toFixed(1)),
+        tempMaxTime,
+        tempMinTime,
+        humidity: Math.round(cur.relative_humidity_2m ?? 0),
+        rainfall: parseFloat((cur.precipitation ?? 0).toFixed(1)),
+        wind: parseFloat((cur.wind_speed_10m ?? 0).toFixed(1)),
+        uvIndex: parseFloat((cur.uv_index ?? 0).toFixed(1)),
+        dewPoint: parseFloat((cur.dew_point_2m ?? 0).toFixed(1)),
+        vpd,
+        weatherCode: (daily.weather_code?.[0] as number) ?? 0,
         sunrise: sunriseStr,
         sunset: sunsetStr,
-      }));
+        desc: wmoCodeToDesc((daily.weather_code?.[0] as number) ?? 0),
+      });
 
-      // Build 3-day forecast from days 1, 2, 3 (skip day 0 = today)
-      const labels = ['Tomorrow', 'In 2 Days', 'In 3 Days'];
-      const days: ForecastDay[] = labels.map((label, i) => ({
-        day: label,
-        tempMax: (daily.temperature_2m_max?.[i + 1] ?? '--').toString(),
-        tempMin: (daily.temperature_2m_min?.[i + 1] ?? '--').toString(),
-        humidity: '--',
-        rain: (daily.precipitation_sum?.[i + 1] ?? 0).toFixed(1),
-        wind: (daily.wind_speed_10m_max?.[i + 1] ?? '--').toString(),
-        desc: wmoCodeToDesc(daily.weather_code?.[i + 1] ?? 0),
-        code: daily.weather_code?.[i + 1] ?? 0,
-      }));
-      setForecast(days);
-    } catch (err) {
+      // 7-day forecast (indices 1–7)
+      setForecast(
+        Array.from({ length: 7 }, (_, i) => ({
+          day: getDayLabel(i + 1),
+          tempMax: ((daily.temperature_2m_max?.[i + 1] as number | undefined)?.toFixed(1) ?? '--'),
+          tempMin: ((daily.temperature_2m_min?.[i + 1] as number | undefined)?.toFixed(1) ?? '--'),
+          rain: ((daily.precipitation_sum?.[i + 1] as number | undefined) ?? 0).toFixed(1),
+          code: (daily.weather_code?.[i + 1] as number) ?? 0,
+        }))
+      );
+    } catch {
       setApiError('Could not reach Open-Meteo. Check your connection, or log data manually.');
     } finally {
       setApiLoading(false);
@@ -148,7 +194,9 @@ export const Weather: React.FC = () => {
     if (query.length < 2) { setSearchResults([]); return; }
     setSearchLoading(true);
     try {
-      const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=6&language=en&format=json`);
+      const res = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=6&language=en&format=json`
+      );
       const data = await res.json();
       setSearchResults((data.results as GeoResult[]) || []);
     } catch {
@@ -170,27 +218,30 @@ export const Weather: React.FC = () => {
     fetchWeather(result.latitude, result.longitude);
   };
 
-  const handleWeatherSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleQuickLog = () => {
+    if (!todayWeather) return;
     addWeatherLog({
-      date: formData.date,
-      temp: Number(formData.temp),
-      humidity: Number(formData.humidity),
-      rainfall: Number(formData.rainfall),
-      wind: Number(formData.wind),
-      aqi: Number(formData.aqi),
-      uv_index: Number(formData.uv_index),
-      sunrise: formData.sunrise,
-      sunset: formData.sunset,
-      dew_point: Number(formData.dew_point)
+      date: new Date().toISOString().split('T')[0],
+      temp: todayWeather.temp,
+      humidity: todayWeather.humidity,
+      rainfall: todayWeather.rainfall,
+      wind: todayWeather.wind,
+      aqi: 0,
+      uv_index: todayWeather.uvIndex,
+      sunrise: todayWeather.sunrise,
+      sunset: todayWeather.sunset,
+      dew_point: todayWeather.dewPoint,
     });
-    setShowAddForm(false);
+    setLoggedNow(true);
+    setTimeout(() => setLoggedNow(false), 2500);
   };
+
+  const vpdInfo = todayWeather ? vpdStatus(todayWeather.vpd) : null;
 
   return (
     <div className="space-y-6">
 
-      {/* 1. LOCATION SETUP BANNER */}
+      {/* LOCATION BANNER */}
       <div className="glass rounded-2xl p-5 border border-slate-200/30 dark:border-slate-800/30 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
           <div className="p-3.5 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-white shadow-md">
@@ -208,7 +259,6 @@ export const Weather: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Location search bar */}
           <div className="relative">
             <input
               type="text"
@@ -248,7 +298,7 @@ export const Weather: React.FC = () => {
         </div>
       </div>
 
-      {/* API Error Banner */}
+      {/* API ERROR */}
       {apiError && (
         <div className="flex items-center gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold">
           <AlertTriangle size={16} className="shrink-0" />
@@ -256,225 +306,140 @@ export const Weather: React.FC = () => {
         </div>
       )}
 
-      {/* 2. THREE-DAY FORECAST */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-        {/* Left: 3-Day Forecast */}
-        <div className="lg:col-span-2 glass rounded-2xl p-5 border border-slate-200/30 dark:border-slate-800/30 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-200/20 dark:border-slate-800/20 pb-2">
-            <h4 className="font-heading font-bold text-slate-700 dark:text-slate-200 text-sm">
-              3-Day Greenhouse Climate Outlook
-            </h4>
-            {forecast.length > 0 && (
-              <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                Live — Open-Meteo
-              </span>
-            )}
+      {/* TODAY'S DETAILED CARD */}
+      {apiLoading ? (
+        <div className="glass rounded-2xl p-10 border border-slate-200/30 dark:border-slate-800/30 shadow-sm flex flex-col items-center gap-4">
+          <RefreshCw size={32} className="animate-spin text-emerald-400" />
+          <span className="text-xs font-semibold text-slate-400">Fetching live weather data...</span>
+        </div>
+      ) : todayWeather ? (
+        <div className="glass rounded-2xl p-6 border border-slate-200/30 dark:border-slate-800/30 shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-200/20 dark:border-slate-800/20 pb-3 mb-5">
+            <h4 className="font-heading font-bold text-slate-700 dark:text-slate-200 text-sm">Today's Greenhouse Conditions</h4>
+            <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+              Live — Open-Meteo
+            </span>
           </div>
 
-          {apiLoading ? (
-            <div className="py-16 flex flex-col items-center gap-3 text-slate-400">
-              <RefreshCw size={28} className="animate-spin text-emerald-400" />
-              <span className="text-xs font-semibold">Fetching live forecast data...</span>
-            </div>
-          ) : forecast.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-semibold text-xs text-slate-600 dark:text-slate-400">
-              {forecast.map(item => (
-                <div key={item.day} className="p-4 bg-slate-100/30 dark:bg-slate-900/20 border border-slate-200/20 rounded-2xl text-center space-y-3">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">{item.day}</span>
-                  <div className="flex justify-center items-center gap-1.5">
-                    <ForecastIcon code={item.code} size={26} />
-                    <span className="text-2xl font-black text-slate-700 dark:text-slate-100 font-heading">{item.tempMax}°</span>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Temperature hero */}
+            <div className="flex items-start gap-5">
+              <ForecastIcon code={todayWeather.weatherCode} size={52} />
+              <div>
+                <div className="text-5xl font-black font-heading text-slate-800 dark:text-slate-100 leading-none tracking-tight">
+                  {todayWeather.temp}°<span className="text-xl font-bold text-slate-400">C</span>
+                </div>
+                <div className="text-sm font-bold text-slate-500 dark:text-slate-400 mt-1">{todayWeather.desc}</div>
+                <div className="mt-3 space-y-1.5 text-xs font-semibold">
+                  <div className="flex items-center gap-2 text-rose-500">
+                    <Thermometer size={13} />
+                    Max: <strong>{todayWeather.tempMax}°C</strong> at {todayWeather.tempMaxTime}
                   </div>
-                  <div className="space-y-1">
-                    <span className="text-[10px] block font-bold text-slate-400">Min: {item.tempMin}° &bull; Rain: {item.rain}mm</span>
-                    <div className="flex items-center justify-center gap-1 text-[9px] text-slate-400">
-                      <Wind size={10} /><span>{item.wind} km/h</span>
-                      <Droplets size={10} className="ml-1" />
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-100 dark:bg-slate-900 border border-slate-200/10 block w-fit mx-auto capitalize">
-                      {item.desc}
-                    </span>
+                  <div className="flex items-center gap-2 text-sky-500">
+                    <Thermometer size={13} />
+                    Min: <strong>{todayWeather.tempMin}°C</strong> at {todayWeather.tempMinTime}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats grid: 4 cols × 2 rows */}
+            <div className="grid grid-cols-4 gap-2 text-xs font-semibold">
+              {[
+                { icon: <Droplets size={15} className="text-sky-400" />, label: 'Humidity', value: `${todayWeather.humidity}%` },
+                { icon: <Wind size={15} className="text-indigo-400" />, label: 'Wind', value: `${todayWeather.wind}`, unit: 'km/h' },
+                { icon: <CloudRain size={15} className="text-blue-400" />, label: 'Rain', value: `${todayWeather.rainfall}`, unit: 'mm' },
+                { icon: <Sun size={15} className="text-amber-400" />, label: 'UV Index', value: `${todayWeather.uvIndex}` },
+              ].map(({ icon, label, value, unit }) => (
+                <div key={label} className="p-2.5 rounded-xl bg-slate-100/40 dark:bg-slate-900/30 border border-slate-200/20 text-center space-y-1.5">
+                  <div className="flex justify-center">{icon}</div>
+                  <div className="text-[9px] text-slate-400 uppercase tracking-wider">{label}</div>
+                  <div className="font-black text-slate-700 dark:text-slate-100 text-sm leading-none">
+                    {value}{unit && <span className="text-[9px] font-bold text-slate-400 ml-0.5">{unit}</span>}
+                  </div>
+                </div>
+              ))}
+
+              <div className="p-2.5 rounded-xl bg-slate-100/40 dark:bg-slate-900/30 border border-slate-200/20 text-center space-y-0.5">
+                <div className="text-[14px] font-black text-teal-400 leading-tight">VPD</div>
+                <div className="text-[9px] text-slate-400 uppercase tracking-wider">kPa</div>
+                <div className={`font-black text-sm ${vpdInfo?.color}`}>{todayWeather.vpd}</div>
+                <div className={`text-[9px] font-bold leading-none ${vpdInfo?.color}`}>{vpdInfo?.text}</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-100/40 dark:bg-slate-900/30 border border-slate-200/20 text-center space-y-1.5">
+                <Droplets size={15} className="mx-auto text-cyan-400" />
+                <div className="text-[9px] text-slate-400 uppercase tracking-wider">Dew Pt</div>
+                <div className="font-black text-slate-700 dark:text-slate-100 text-sm">{todayWeather.dewPoint}°</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-100/40 dark:bg-slate-900/30 border border-slate-200/20 text-center space-y-0.5">
+                <div className="text-amber-400 text-base font-black leading-tight">↑</div>
+                <div className="text-[9px] text-slate-400 uppercase tracking-wider">Sunrise</div>
+                <div className="font-black text-slate-700 dark:text-slate-100 text-[11px]">{todayWeather.sunrise}</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-100/40 dark:bg-slate-900/30 border border-slate-200/20 text-center space-y-0.5">
+                <div className="text-indigo-400 text-base font-black leading-tight">↓</div>
+                <div className="text-[9px] text-slate-400 uppercase tracking-wider">Sunset</div>
+                <div className="font-black text-slate-700 dark:text-slate-100 text-[11px]">{todayWeather.sunset}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* One-click log */}
+          <div className="mt-5 pt-4 border-t border-slate-200/20 dark:border-slate-800/20 flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleQuickLog}
+              disabled={loggedNow}
+              className={`px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+                loggedNow
+                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 cursor-default'
+                  : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-md'
+              }`}
+            >
+              <Calendar size={13} />
+              {loggedNow ? 'Logged ✓' : "Log Today's Climatic Record"}
+            </button>
+            <span className="text-[10px] text-slate-400 font-semibold">
+              Instantly saves current live readings — no edits needed
+            </span>
+          </div>
+        </div>
+      ) : !hasCoords ? (
+        <div className="glass rounded-2xl p-10 border border-slate-200/30 dark:border-slate-800/30 shadow-sm text-center space-y-3">
+          <CloudSun size={44} className="mx-auto text-slate-300 dark:text-slate-700" />
+          <p className="text-slate-400 text-sm font-semibold">
+            Search for a location or use <span className="text-emerald-500 font-bold">Capture GPS</span> to load live weather.
+          </p>
+        </div>
+      ) : null}
+
+      {/* 7-DAY FORECAST STRIP */}
+      {forecast.length > 0 && (
+        <div className="glass rounded-2xl p-5 border border-slate-200/30 dark:border-slate-800/30 shadow-sm space-y-3">
+          <h4 className="font-heading font-bold text-slate-700 dark:text-slate-200 text-sm">7-Day Climate Outlook</h4>
+          <div className="overflow-x-auto no-scrollbar">
+            <div className="flex gap-2 min-w-max">
+              {forecast.map((item) => (
+                <div
+                  key={item.day}
+                  className="flex flex-col items-center gap-1.5 p-3 rounded-xl bg-slate-100/30 dark:bg-slate-900/20 border border-slate-200/20 w-[82px] text-center shrink-0"
+                >
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-tight">{item.day}</span>
+                  <ForecastIcon code={item.code} size={20} />
+                  <div className="text-xs font-black text-slate-700 dark:text-slate-100">{item.tempMax}°</div>
+                  <div className="text-[10px] text-slate-400 font-bold">{item.tempMin}°</div>
+                  <div className="flex items-center gap-0.5 text-[9px] text-sky-500 font-bold">
+                    <Droplets size={8} />{item.rain}mm
                   </div>
                 </div>
               ))}
             </div>
-          ) : (
-            <div className="py-16 text-center text-slate-400 italic text-xs space-y-3">
-              <CloudSun size={36} className="mx-auto text-slate-300 dark:text-slate-700" />
-              <p>Click <span className="font-bold text-sky-500">Fetch Live Weather</span> or <span className="font-bold text-emerald-500">Capture GPS</span> to load real forecast data from Open-Meteo.</p>
-            </div>
-          )}
-        </div>
-
-        {/* Right: Logger Actions */}
-        <div className="glass rounded-2xl p-5 border border-slate-200/30 dark:border-slate-800/30 shadow-sm h-fit flex flex-col gap-4">
-          <div className="space-y-1">
-            <h4 className="font-heading font-bold text-slate-700 dark:text-slate-200 text-sm">Climatic Capture Logger</h4>
-            <p className="text-[10px] text-slate-400">
-              Use <strong>Fetch Live Weather</strong> to auto-fill current conditions from Open-Meteo, then log a reading manually.
-            </p>
           </div>
-
-          {/* Current condition summary if fetched */}
-          {!apiLoading && forecast.length > 0 && (
-            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 space-y-1">
-              <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">Current Conditions (Live)</span>
-              <div className="grid grid-cols-2 gap-1 text-[10px] font-semibold text-slate-600 dark:text-slate-400">
-                <span>Temp: <strong className="text-slate-800 dark:text-slate-200">{formData.temp}°C</strong></span>
-                <span>Humidity: <strong className="text-slate-800 dark:text-slate-200">{formData.humidity}%</strong></span>
-                <span>Wind: <strong className="text-slate-800 dark:text-slate-200">{formData.wind} km/h</strong></span>
-                <span>Rain: <strong className="text-slate-800 dark:text-slate-200">{formData.rainfall} mm</strong></span>
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-all"
-          >
-            <PlusCircle size={14} />
-            {showAddForm ? 'Hide Logger' : 'Log Today\'s Climatic Record'}
-          </button>
-        </div>
-      </div>
-
-      {/* 3. LOG WEATHER DATA FORM */}
-      {showAddForm && (
-        <div className="glass-premium rounded-2xl p-6 border border-slate-200/50 dark:border-slate-800/40 shadow-md animate-slide-up space-y-4">
-          <div>
-            <h3 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-100">Log Greenhouse Climatic Readings</h3>
-            <p className="text-xs text-slate-400">Values are pre-filled from live API data if fetched. VPD will be auto-computed from temp and humidity.</p>
-          </div>
-
-          <form onSubmit={handleWeatherSubmit} className="space-y-4 text-xs font-semibold">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Reading Date</label>
-                <input
-                  type="date"
-                  required
-                  value={formData.date}
-                  onChange={(e) => setFormData({...formData, date: e.target.value})}
-                  className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Greenhouse Temp (°C)</label>
-                <input
-                  type="number"
-                  required
-                  step="any"
-                  value={formData.temp}
-                  onChange={(e) => setFormData({...formData, temp: e.target.value})}
-                  className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Relative Humidity (%)</label>
-                <input
-                  type="number"
-                  required
-                  min="0"
-                  max="100"
-                  step="any"
-                  value={formData.humidity}
-                  onChange={(e) => setFormData({...formData, humidity: e.target.value})}
-                  className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Rainfall (mm)</label>
-                <input
-                  type="number"
-                  required
-                  value={formData.rainfall}
-                  onChange={(e) => setFormData({...formData, rainfall: e.target.value})}
-                  className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Wind Speed (km/h)</label>
-                <input
-                  type="number"
-                  required
-                  value={formData.wind}
-                  onChange={(e) => setFormData({...formData, wind: e.target.value})}
-                  className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">AQI Index</label>
-                <input
-                  type="number"
-                  required
-                  value={formData.aqi}
-                  onChange={(e) => setFormData({...formData, aqi: e.target.value})}
-                  className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">UV Index</label>
-                <input
-                  type="number"
-                  required
-                  value={formData.uv_index}
-                  onChange={(e) => setFormData({...formData, uv_index: e.target.value})}
-                  className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Sunrise Time</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 05:45 AM"
-                  value={formData.sunrise}
-                  onChange={(e) => setFormData({...formData, sunrise: e.target.value})}
-                  className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Sunset Time</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 06:50 PM"
-                  value={formData.sunset}
-                  onChange={(e) => setFormData({...formData, sunset: e.target.value})}
-                  className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Dew Point (°C)</label>
-                <input
-                  type="number"
-                  step="any"
-                  value={formData.dew_point}
-                  onChange={(e) => setFormData({...formData, dew_point: e.target.value})}
-                  className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold rounded-xl shadow-md transition-all"
-            >
-              Record Daily Micro-climate Reading
-            </button>
-          </form>
         </div>
       )}
 
-      {/* 4. CLIMATE LEDGER TABLE */}
+      {/* CLIMATIC LEDGER */}
       <div className="glass rounded-2xl p-5 border border-slate-200/30 dark:border-slate-800/30 shadow-sm space-y-4">
         <h4 className="font-heading font-bold text-slate-700 dark:text-slate-200 text-sm">Climatic Registration Ledger</h4>
-
         {weatherLogs.length > 0 ? (
           <div className="overflow-x-auto no-scrollbar">
             <table className="w-full text-xs font-semibold text-left border-collapse min-w-[600px]">
