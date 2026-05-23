@@ -111,23 +111,26 @@ function saveLocal(state: Partial<AppState>) {
   } catch { /* storage full or private mode */ }
 }
 
-// Fire-and-forget Supabase upsert — never blocks the UI
+// Fire-and-forget Supabase upsert — never blocks the UI.
+// userId guard is a fast-fail using the store's cached auth state;
+// upsertRow re-verifies via supabase.auth.getUser() before writing.
 function bgUpsert(table: string, obj: unknown, userId: string | undefined) {
   if (!userId) return;
-  void Promise.resolve(upsertRow(table, obj as Record<string, unknown>, userId)).catch((e) => {
+  void upsertRow(table, obj as Record<string, unknown>).catch((e) => {
     console.error(`[Sync] bgUpsert failed for ${table}:`, e);
   });
 }
 function bgDelete(table: string, id: string, userId: string | undefined) {
   if (!userId) return;
-  void Promise.resolve(deleteRow(table, id)).catch((e) => {
+  void deleteRow(table, id).catch((e) => {
     console.error(`[Sync] bgDelete failed for ${table}:`, e);
   });
 }
 
 // Recovery path: push all local records to Supabase when bgUpsert previously failed silently.
 // Returns true only if every upsert succeeded — caller should only clear syncQueue on true.
-async function pushAllLocalToSupabase(state: Partial<AppState>, userId: string): Promise<boolean> {
+// upsertRow fetches the active session itself, so no userId parameter is needed here.
+async function pushAllLocalToSupabase(state: Partial<AppState>): Promise<boolean> {
   let allOk = true;
   const tables: Array<{ name: string; rows: unknown[] }> = [
     { name: 'crops',        rows: state.crops        ?? [] },
@@ -140,7 +143,7 @@ async function pushAllLocalToSupabase(state: Partial<AppState>, userId: string):
   await Promise.all(
     tables.flatMap(({ name, rows }) =>
       rows.map(row =>
-        Promise.resolve(upsertRow(name, row as Record<string, unknown>, userId)).catch(e => {
+        upsertRow(name, row as Record<string, unknown>).catch(e => {
           console.error(`[Sync] Recovery upsert failed for ${name}:`, e);
           allOk = false;
         })
@@ -220,7 +223,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // or the page was refreshed before the in-flight request completed).
         // Local is authoritative here — push everything up. Do NOT overwrite local with
         // stale Supabase data, which would lose the pending entries.
-        const ok = await pushAllLocalToSupabase(get(), authUser.id);
+        const ok = await pushAllLocalToSupabase(get());
         if (ok) {
           set({ syncQueue: [] });
           saveLocal(get());

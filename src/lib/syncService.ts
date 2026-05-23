@@ -34,11 +34,17 @@ export async function pullAllData(userId: string) {
   };
 }
 
-export function upsertRow(table: string, obj: AnyRecord, userId: string) {
-  const row = toDbRow(obj, userId);
-  return supabase.from(table).upsert(row, { onConflict: 'id' });
+export async function upsertRow(table: string, obj: AnyRecord): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error(`[Sync] No active session — cannot write to ${table}`);
+  const row = toDbRow(obj, user.id);
+  const { error } = await supabase.from(table).upsert(row, { onConflict: 'id' });
+  if (error) throw error;
 }
 
-export function deleteRow(table: string, id: string) {
-  return supabase.from(table).delete().eq('id', id);
+export async function deleteRow(table: string, id: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error(`[Sync] No active session — cannot delete from ${table}`);
+  const { error } = await supabase.from(table).delete().eq('id', id);
+  if (error) throw error;
 }
