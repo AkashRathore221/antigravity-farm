@@ -113,11 +113,36 @@ function saveLocal(state: Partial<AppState>) {
 // Fire-and-forget Supabase upsert — never blocks the UI
 function bgUpsert(table: string, obj: unknown, userId: string | undefined) {
   if (!userId) return;
-  void Promise.resolve(upsertRow(table, obj as Record<string, unknown>, userId)).catch(() => {});
+  void Promise.resolve(upsertRow(table, obj as Record<string, unknown>, userId)).catch((e) => {
+    console.error(`[Sync] bgUpsert failed for ${table}:`, e);
+  });
 }
 function bgDelete(table: string, id: string, userId: string | undefined) {
   if (!userId) return;
-  void Promise.resolve(deleteRow(table, id)).catch(() => {});
+  void Promise.resolve(deleteRow(table, id)).catch((e) => {
+    console.error(`[Sync] bgDelete failed for ${table}:`, e);
+  });
+}
+
+// Recovery path: push all local records to Supabase when bgUpsert previously failed silently
+async function pushAllLocalToSupabase(state: Partial<AppState>, userId: string) {
+  const tables: Array<{ name: string; rows: unknown[] }> = [
+    { name: 'crops',        rows: state.crops        ?? [] },
+    { name: 'inventory',    rows: state.inventory     ?? [] },
+    { name: 'usage_logs',   rows: state.usageLogs     ?? [] },
+    { name: 'harvests',     rows: state.harvests      ?? [] },
+    { name: 'expenses',     rows: state.expenses      ?? [] },
+    { name: 'weather_logs', rows: state.weatherLogs   ?? [] },
+  ];
+  await Promise.all(
+    tables.flatMap(({ name, rows }) =>
+      rows.map(row =>
+        Promise.resolve(upsertRow(name, row as Record<string, unknown>, userId)).catch(e =>
+          console.error(`[Sync] Recovery upsert failed for ${name}:`, e)
+        )
+      )
+    )
+  );
 }
 
 // ─── Store ─────────────────────────────────────────────────────────────────────
@@ -169,12 +194,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   pullFromSupabase: async () => {
-    const { authUser } = get();
+    const { authUser, syncQueue } = get();
     if (!authUser) return;
     set({ isSyncing: true });
     try {
       const data = await pullAllData(authUser.id);
-      if (data.errors.length === 0 || (data.crops.length + data.inventory.length) > 0) {
+
+      if (data.errors.length > 0) {
+        // Supabase returned errors — preserve local state unchanged to avoid data loss
+        console.error('[Sync] pullFromSupabase errors:', data.errors);
+        return;
+      }
+
+      const cloudTotal =
+        data.crops.length + data.inventory.length + data.usageLogs.length +
+        data.harvests.length + data.expenses.length + data.weatherLogs.length;
+
+      if (cloudTotal > 0) {
+        // Supabase has records — use as canonical source
         const activeCropId = data.crops.find(c => c.status === 'active')?.id ?? null;
         set({
           crops: data.crops,
@@ -187,7 +224,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           syncQueue: [],
         });
         saveLocal(get());
+      } else if (syncQueue.length > 0) {
+        // Supabase empty but local has pending changes — bgUpsert likely failed earlier.
+        // Push all local state to Supabase as recovery, then clear the queue.
+        await pushAllLocalToSupabase(get(), authUser.id);
+        set({ syncQueue: [] });
+        saveLocal(get());
       }
+      // Supabase empty + no syncQueue = brand-new user or mock-only state; leave local untouched
+    } catch (err) {
+      console.error('[Sync] pullFromSupabase threw:', err);
     } finally {
       set({ isSyncing: false });
     }
