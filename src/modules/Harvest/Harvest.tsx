@@ -12,10 +12,9 @@ export const Harvest: React.FC = () => {
     date: new Date().toISOString().split('T')[0],
     grade_a: '',
     grade_b: '',
-    grade_c: '',
     wastage: '',
     buyer_name: 'City Wholesale Mandi',
-    mandi_rate: '',
+    net_revenue: '',
     sale_rate: '',
     notes: ''
   });
@@ -29,11 +28,9 @@ export const Harvest: React.FC = () => {
 
     const gA = Number(formData.grade_a) || 0;
     const gB = Number(formData.grade_b) || 0;
-    const gC = Number(formData.grade_c) || 0;
     const waste = Number(formData.wastage) || 0;
-    
-    // Auto calculate total weight
-    const totalWeight = gA + gB + gC + waste;
+
+    const totalWeight = gA + gB + waste;
 
     if (totalWeight <= 0) {
       alert('Harvest weight must be greater than zero.');
@@ -46,10 +43,10 @@ export const Harvest: React.FC = () => {
       weight_total: totalWeight,
       weight_grade_a: gA,
       weight_grade_b: gB,
-      weight_grade_c: gC,
+      weight_grade_c: 0,
       wastage: waste,
       buyer_name: formData.buyer_name,
-      mandi_rate: Number(formData.mandi_rate) || Number(formData.sale_rate),
+      mandi_rate: Number(formData.net_revenue) || 0,
       sale_rate: Number(formData.sale_rate),
       notes: formData.notes
     });
@@ -59,10 +56,9 @@ export const Harvest: React.FC = () => {
       date: new Date().toISOString().split('T')[0],
       grade_a: '',
       grade_b: '',
-      grade_c: '',
       wastage: '',
       buyer_name: 'City Wholesale Mandi',
-      mandi_rate: '',
+      net_revenue: '',
       sale_rate: '',
       notes: ''
     });
@@ -78,13 +74,11 @@ export const Harvest: React.FC = () => {
   // Grade distribution splits
   const totalGradeA = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_a), 0);
   const totalGradeB = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_b), 0);
-  const totalGradeC = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_c), 0);
   const totalWastage = cropHarvests.reduce((sum, h) => sum + Number(h.wastage), 0);
 
-  const totalSum = totalGradeA + totalGradeB + totalGradeC + totalWastage;
+  const totalSum = totalGradeA + totalGradeB + totalWastage;
   const pctA = totalSum > 0 ? parseFloat(((totalGradeA / totalSum) * 100).toFixed(1)) : 0;
   const pctB = totalSum > 0 ? parseFloat(((totalGradeB / totalSum) * 100).toFixed(1)) : 0;
-  const pctC = totalSum > 0 ? parseFloat(((totalGradeC / totalSum) * 100).toFixed(1)) : 0;
   const pctW = totalSum > 0 ? parseFloat(((totalWastage / totalSum) * 100).toFixed(1)) : 0;
 
   // Active crop unit cost
@@ -105,9 +99,8 @@ export const Harvest: React.FC = () => {
   // Calculate live dynamic form inputs
   const liveFormGradeA = Number(formData.grade_a) || 0;
   const liveFormGradeB = Number(formData.grade_b) || 0;
-  const liveFormGradeC = Number(formData.grade_c) || 0;
   const liveFormWastage = Number(formData.wastage) || 0;
-  const liveFormTotal = liveFormGradeA + liveFormGradeB + liveFormGradeC + liveFormWastage;
+  const liveFormTotal = liveFormGradeA + liveFormGradeB + liveFormWastage;
   const liveFormRevenue = liveFormTotal * (Number(formData.sale_rate) || 0);
 
   return (
@@ -178,22 +171,17 @@ export const Harvest: React.FC = () => {
           <div className="w-full h-4 bg-slate-200 dark:bg-slate-800 rounded-full flex overflow-hidden">
             <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pctA}%` }} title={`Grade A: ${pctA}%`}></div>
             <div className="h-full bg-emerald-300 transition-all" style={{ width: `${pctB}%` }} title={`Grade B: ${pctB}%`}></div>
-            <div className="h-full bg-amber-400 transition-all" style={{ width: `${pctC}%` }} title={`Grade C: ${pctC}%`}></div>
             <div className="h-full bg-rose-500 transition-all" style={{ width: `${pctW}%` }} title={`Wastage: ${pctW}%`}></div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-semibold text-slate-600 dark:text-slate-400">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-semibold text-slate-600 dark:text-slate-400">
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-emerald-500 block shrink-0"></span>
               <span>Grade A (Premium): <b className="text-slate-700 dark:text-slate-200">{totalGradeA} kg ({pctA}%)</b></span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-emerald-300 block shrink-0"></span>
-              <span>Grade B (Slight Curves): <b className="text-slate-700 dark:text-slate-200">{totalGradeB} kg ({pctB}%)</b></span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-amber-400 block shrink-0"></span>
-              <span>Grade C (Local Feed): <b className="text-slate-700 dark:text-slate-200">{totalGradeC} kg ({pctC}%)</b></span>
+              <span>Grade B (Curved): <b className="text-slate-700 dark:text-slate-200">{totalGradeB} kg ({pctB}%)</b></span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-rose-500 block shrink-0"></span>
@@ -230,9 +218,7 @@ export const Harvest: React.FC = () => {
 
           {filteredHarvests.length > 0 ? (
             <div className="space-y-3 max-h-[450px] overflow-y-auto pr-1">
-              {filteredHarvests.map(har => {
-                const markup = har.sale_rate - har.mandi_rate;
-                return (
+              {filteredHarvests.map(har => (
                   <div key={har.id} className="p-4 bg-slate-100/30 dark:bg-slate-900/20 border border-slate-200/30 dark:border-slate-800/20 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-4 text-xs font-semibold">
                     <div className="space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2">
@@ -244,7 +230,7 @@ export const Harvest: React.FC = () => {
                           {har.buyer_name}
                         </span>
                       </div>
-                      
+
                       <h5 className="text-sm font-black text-slate-700 dark:text-slate-200">
                         {har.weight_total} kg <span className="text-xs font-semibold text-slate-400">Total Yield</span>
                       </h5>
@@ -252,7 +238,6 @@ export const Harvest: React.FC = () => {
                       <div className="flex items-center gap-3 text-[10px] text-slate-400 font-bold">
                         <span>A: <b className="text-slate-600 dark:text-slate-300">{har.weight_grade_a}kg</b></span>
                         <span>B: <b className="text-slate-600 dark:text-slate-300">{har.weight_grade_b}kg</b></span>
-                        <span>C: <b className="text-slate-600 dark:text-slate-300">{har.weight_grade_c}kg</b></span>
                         <span className="text-rose-400">Waste: <b className="text-rose-500">{har.wastage}kg</b></span>
                       </div>
 
@@ -266,13 +251,11 @@ export const Harvest: React.FC = () => {
                     {/* Rates & Revenue */}
                     <div className="flex sm:flex-col justify-between items-center sm:items-end gap-3 shrink-0 border-t sm:border-t-0 border-slate-200/20 pt-2 sm:pt-0">
                       <div className="text-left sm:text-right text-[10px]">
-                        <span className="text-slate-400 block font-semibold">Rate: Sold vs Mandi</span>
-                        <span className="font-bold text-slate-700 dark:text-slate-200">
-                          ₹{har.sale_rate}/kg <span className="text-slate-400 font-normal">vs ₹{har.mandi_rate}/kg</span>
-                        </span>
-                        {markup > 0 && (
-                          <span className="text-[9px] text-emerald-500 font-bold block mt-0.5">
-                            +₹{markup.toFixed(2)} premium markup
+                        <span className="text-slate-400 block font-semibold">Sold Rate</span>
+                        <span className="font-bold text-slate-700 dark:text-slate-200">₹{har.sale_rate}/kg</span>
+                        {har.mandi_rate > 0 && (
+                          <span className="text-[9px] text-slate-400 font-bold block mt-0.5">
+                            Net Revenue: ₹{har.mandi_rate.toFixed(2)}
                           </span>
                         )}
                       </div>
@@ -298,8 +281,7 @@ export const Harvest: React.FC = () => {
                     </div>
 
                   </div>
-                );
-              })}
+              ))}
             </div>
           ) : (
             <div className="py-12 text-center text-slate-400 text-xs italic">
@@ -332,9 +314,9 @@ export const Harvest: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <label className="text-emerald-500">Grade A - Premium (kg)</label>
+                  <label className="text-emerald-500">Grade A (kg)</label>
                   <input
                     type="number"
                     min="0"
@@ -346,7 +328,7 @@ export const Harvest: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-emerald-400">Grade B - Curved (kg)</label>
+                  <label className="text-emerald-400">Grade B (kg)</label>
                   <input
                     type="number"
                     min="0"
@@ -357,23 +339,8 @@ export const Harvest: React.FC = () => {
                     className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-amber-500">Grade C - Feed (kg)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    placeholder="0"
-                    value={formData.grade_c}
-                    onChange={(e) => setFormData({...formData, grade_c: e.target.value})}
-                    className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-rose-500 font-bold">Wastage - Rot (kg)</label>
+                  <label className="text-rose-500 font-bold">Wastage (kg)</label>
                   <input
                     type="number"
                     min="0"
@@ -404,27 +371,27 @@ export const Harvest: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-slate-500 dark:text-slate-400">Sold Price ($/kg)</label>
+                  <label className="text-slate-500 dark:text-slate-400">Sold Price (₹/kg)</label>
                   <input
                     type="number"
                     required
                     min="0.01"
                     step="any"
-                    placeholder="e.g. 1.25"
+                    placeholder="e.g. 15.00"
                     value={formData.sale_rate}
                     onChange={(e) => setFormData({...formData, sale_rate: e.target.value})}
                     className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-slate-500 dark:text-slate-400">Local Mandi Rate ($/kg)</label>
+                  <label className="text-slate-500 dark:text-slate-400">Net Revenue (₹)</label>
                   <input
                     type="number"
-                    min="0.01"
+                    min="0"
                     step="any"
-                    placeholder="Mandi benchmark..."
-                    value={formData.mandi_rate}
-                    onChange={(e) => setFormData({...formData, mandi_rate: e.target.value})}
+                    placeholder="After commission, transport..."
+                    value={formData.net_revenue}
+                    onChange={(e) => setFormData({...formData, net_revenue: e.target.value})}
                     className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
