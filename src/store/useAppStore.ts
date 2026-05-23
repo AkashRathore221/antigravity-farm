@@ -440,7 +440,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Harvest ──────────────────────────────────────────────────────────────────
   addHarvest: (harvestData) => {
     const { harvests, syncQueue, authUser } = get();
-    const revenue = parseFloat((harvestData.weight_total * harvestData.sale_rate).toFixed(2));
+    const revenue = parseFloat(harvestData.mandi_rate.toFixed(2));
     const newHarvest: Harvest = { ...harvestData, id: newId('har'), tenant_id: 'tenant-1', revenue, created_at: new Date().toISOString() };
     const newQueue = addToQueue(syncQueue, 'insert', 'harvests', newHarvest);
     set({ harvests: [newHarvest, ...harvests], syncQueue: newQueue });

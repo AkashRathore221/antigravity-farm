@@ -101,7 +101,7 @@ export const Harvest: React.FC = () => {
   const liveFormGradeB = Number(formData.grade_b) || 0;
   const liveFormWastage = Number(formData.wastage) || 0;
   const liveFormTotal = liveFormGradeA + liveFormGradeB + liveFormWastage;
-  const liveFormRevenue = liveFormTotal * (Number(formData.sale_rate) || 0);
+  const liveFormRevenue = Number(formData.net_revenue) || 0;
 
   return (
     <div className="space-y-6">
@@ -251,25 +251,20 @@ export const Harvest: React.FC = () => {
                     {/* Rates & Revenue */}
                     <div className="flex sm:flex-col justify-between items-center sm:items-end gap-3 shrink-0 border-t sm:border-t-0 border-slate-200/20 pt-2 sm:pt-0">
                       <div className="text-left sm:text-right text-[10px]">
-                        <span className="text-slate-400 block font-semibold">Sold Rate</span>
-                        <span className="font-bold text-slate-700 dark:text-slate-200">₹{har.sale_rate}/kg</span>
-                        {har.mandi_rate > 0 && (
-                          <span className="text-[9px] text-slate-400 font-bold block mt-0.5">
-                            Net Revenue: ₹{har.mandi_rate.toFixed(2)}
-                          </span>
-                        )}
+                        <span className="text-slate-400 block font-semibold">Gross Rate (ref)</span>
+                        <span className="font-semibold text-slate-500 dark:text-slate-400">₹{har.sale_rate}/kg</span>
                       </div>
 
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <span className="text-[9px] text-slate-400 block uppercase font-bold">Revenue</span>
+                          <span className="text-[9px] text-slate-400 block uppercase font-bold">Net Revenue</span>
                           <span className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400 font-heading">
                             +₹{har.revenue.toFixed(2)}
                           </span>
                         </div>
                         <button
                           onClick={() => {
-                            if (window.confirm(`Delete harvest record logged on ${har.date}? This removes ₹${har.revenue} from crop gross.`)) {
+                            if (window.confirm(`Delete harvest record logged on ${har.date}? This removes ₹${har.revenue.toFixed(2)} net revenue from totals.`)) {
                               deleteHarvest(har.id);
                             }
                           }}
