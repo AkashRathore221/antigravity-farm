@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" fill="#0f172a"/>
+
+  <!-- Gradient definitions -->
+  <defs>
+    <linearGradient id="leafGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#14b8a6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="stemGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#34d399;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#059669;stop-opacity:1" />
+    </linearGradient>
+    <radialGradient id="glowGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:0.15" />
+      <stop offset="100%" style="stop-color:#10b981;stop-opacity:0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Glow backdrop -->
+  <circle cx="256" cy="256" r="200" fill="url(#glowGrad)"/>
+
+  <!-- Cucumber body -->
+  <ellipse cx="256" cy="280" rx="60" ry="140" fill="url(#leafGrad)" rx="60" ry="140"/>
+  <!-- Cucumber bumps/texture -->
+  <ellipse cx="256" cy="180" rx="18" ry="8" fill="#34d399" opacity="0.6"/>
+  <ellipse cx="230" cy="220" rx="14" ry="7" fill="#34d399" opacity="0.5"/>
+  <ellipse cx="282" cy="240" rx="14" ry="7" fill="#34d399" opacity="0.5"/>
+  <ellipse cx="240" cy="270" rx="12" ry="6" fill="#34d399" opacity="0.4"/>
+  <ellipse cx="272" cy="300" rx="12" ry="6" fill="#34d399" opacity="0.4"/>
+  <ellipse cx="248" cy="330" rx="10" ry="5" fill="#34d399" opacity="0.3"/>
+
+  <!-- Cucumber tip top -->
+  <ellipse cx="256" cy="145" rx="28" ry="18" fill="#059669"/>
+  <!-- Stem -->
+  <rect x="248" y="120" width="16" height="35" rx="8" fill="url(#stemGrad)"/>
+
+  <!-- Left leaf -->
+  <path d="M196 160 Q140 120 120 170 Q130 230 196 210 Z" fill="url(#leafGrad)" opacity="0.85"/>
+  <line x1="196" y1="160" x2="138" y2="185" stroke="#34d399" stroke-width="3" opacity="0.6"/>
+
+  <!-- Right leaf -->
+  <path d="M316 160 Q372 120 392 170 Q382 230 316 210 Z" fill="url(#leafGrad)" opacity="0.85"/>
+  <line x1="316" y1="160" x2="374" y2="185" stroke="#34d399" stroke-width="3" opacity="0.6"/>
+
+  <!-- Small sparkle dots (agri-tech feel) -->
+  <circle cx="150" cy="320" r="5" fill="#10b981" opacity="0.5"/>
+  <circle cx="362" cy="300" r="4" fill="#14b8a6" opacity="0.4"/>
+  <circle cx="140" cy="280" r="3" fill="#6ee7b7" opacity="0.5"/>
+  <circle cx="370" cy="350" r="3" fill="#6ee7b7" opacity="0.4"/>
+
+  <!-- Polyhouse arc suggestion (subtle) -->
+  <path d="M100 420 Q256 340 412 420" stroke="#10b981" stroke-width="3" fill="none" opacity="0.25" stroke-dasharray="8 6"/>
+</svg>

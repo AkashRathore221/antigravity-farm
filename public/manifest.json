@@ -1,0 +1,34 @@
+{
+  "name": "Antigravity Farm Manager",
+  "short_name": "Farm Manager",
+  "description": "Premium polyhouse cucumber farm management — crop cycles, inventory, harvests, expenses, weather VPD, analytics and export reports.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#10b981",
+  "orientation": "any",
+  "scope": "/",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["productivity", "agriculture", "business"],
+  "prefer_related_applications": false
+}
