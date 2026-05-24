@@ -7,6 +7,18 @@ export const Harvest: React.FC = () => {
   const activeCrop = crops.find(c => c.status === 'active');
 
   const [searchQuery, setSearchQuery] = useState('');
+  // Buyer autocomplete
+  const [buyerSuggestions, setBuyerSuggestions] = useState<string[]>([]);
+  const uniqueBuyers = Array.from(new Set(harvests.map(h => h.buyer_name).filter(Boolean)));
+  const handleBuyerChange = (val: string) => {
+    setFormData(prev => ({ ...prev, buyer_name: val }));
+    if (val.length >= 1) {
+      setBuyerSuggestions(uniqueBuyers.filter(b => b.toLowerCase().includes(val.toLowerCase())));
+    } else {
+      setBuyerSuggestions([]);
+    }
+  };
+
   // Form state
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -161,6 +173,28 @@ export const Harvest: React.FC = () => {
           </span>
         </div>
       </div>
+
+      {/* CUMULATIVE YIELD PROGRESS (if target set) */}
+      {activeCrop && (activeCrop.target_yield_kg ?? 0) > 0 && (
+        <div className="glass rounded-2xl p-5 border border-emerald-500/20 dark:border-emerald-900/40 shadow-sm space-y-3 bg-emerald-500/5">
+          <div className="flex justify-between items-center text-xs font-semibold">
+            <span className="text-emerald-700 dark:text-emerald-300 font-bold">Yield Target Progress</span>
+            <span className="text-emerald-600 dark:text-emerald-400">
+              {totalProduction.toLocaleString()} kg harvested &bull; {((activeCrop.target_yield_kg ?? 0) - totalProduction).toLocaleString()} kg remaining
+            </span>
+          </div>
+          <div className="w-full h-4 bg-emerald-100 dark:bg-emerald-950/50 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all rounded-full flex items-center justify-end pr-2"
+              style={{ width: `${Math.min(100, (totalProduction / (activeCrop.target_yield_kg ?? 1)) * 100)}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+            <span>{Math.min(100, (totalProduction / (activeCrop.target_yield_kg ?? 1)) * 100).toFixed(1)}% of target</span>
+            <span>Target: {(activeCrop.target_yield_kg ?? 0).toLocaleString()} kg</span>
+          </div>
+        </div>
+      )}
 
       {/* 2. GRADE SPLITS PROGRESS VISUAL */}
       {totalSum > 0 && (
@@ -353,15 +387,30 @@ export const Harvest: React.FC = () => {
                 <span className="font-black text-slate-700 dark:text-slate-200 text-lg font-heading">{liveFormTotal} kg</span>
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-1 relative">
                 <label className="text-slate-500 dark:text-slate-400">Contract Buyer Name</label>
                 <input
                   type="text"
                   required
                   value={formData.buyer_name}
-                  onChange={(e) => setFormData({...formData, buyer_name: e.target.value})}
+                  onChange={(e) => handleBuyerChange(e.target.value)}
+                  onBlur={() => setTimeout(() => setBuyerSuggestions([]), 150)}
                   className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                 />
+                {buyerSuggestions.length > 0 && (
+                  <div className="absolute top-full mt-1 left-0 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl z-50 overflow-hidden">
+                    {buyerSuggestions.map((b, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onMouseDown={() => { setFormData(prev => ({ ...prev, buyer_name: b })); setBuyerSuggestions([]); }}
+                        className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400 border-b border-slate-100 dark:border-slate-800 last:border-0 transition-colors"
+                      >
+                        {b}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">

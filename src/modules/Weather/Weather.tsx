@@ -84,7 +84,7 @@ function getDayLabel(daysFromNow: number): string {
 }
 
 export const Weather: React.FC = () => {
-  const { weatherLogs, addWeatherLog } = useAppStore();
+  const { weatherLogs, addWeatherLog, settings } = useAppStore();
 
   const [gpsLoading, setGpsLoading] = useState(false);
   const [apiLoading, setApiLoading] = useState(false);
@@ -191,8 +191,20 @@ export const Weather: React.FC = () => {
         fetchWeather(lat, lon);
       },
       () => {
-        alert('Failed to capture GPS. Please search for a location manually.');
         setGpsLoading(false);
+        const city = settings.farmProfile?.farmCity;
+        if (city) {
+          fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`)
+            .then(r => r.json())
+            .then(d => {
+              const r = (d.results as GeoResult[] | undefined)?.[0];
+              if (r) selectLocation(r);
+              else alert('Failed to capture GPS. Please search for a location manually.');
+            })
+            .catch(() => alert('Failed to capture GPS. Please search for a location manually.'));
+        } else {
+          alert('Failed to capture GPS. Please search for a location manually.');
+        }
       }
     );
   };
@@ -240,6 +252,8 @@ export const Weather: React.FC = () => {
       sunrise: todayWeather.sunrise,
       sunset: todayWeather.sunset,
       dew_point: todayWeather.dewPoint,
+      temp_min: todayWeather.tempMin,
+      temp_max: todayWeather.tempMax,
     });
     setLoggedNow(true);
     setTimeout(() => setLoggedNow(false), 2500);
@@ -261,7 +275,18 @@ export const Weather: React.FC = () => {
           setSearchQuery(`GPS: ${lat}° N, ${lon}° E`);
           fetchWeather(lat, lon);
         },
-        () => { /* silent — user can grant GPS manually */ }
+        () => {
+          const city = settings.farmProfile?.farmCity;
+          if (city) {
+            fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`)
+              .then(r => r.json())
+              .then(d => {
+                const r = (d.results as GeoResult[] | undefined)?.[0];
+                if (r) selectLocation(r);
+              })
+              .catch(() => { /* silent */ });
+          }
+        }
       );
     }
 
@@ -293,6 +318,8 @@ export const Weather: React.FC = () => {
           sunrise: tw.sunrise,
           sunset: tw.sunset,
           dew_point: tw.dewPoint,
+          temp_min: tw.tempMin,
+          temp_max: tw.tempMax,
         });
         autoSavedTodayRef.current = true;
       }
@@ -535,6 +562,11 @@ export const Weather: React.FC = () => {
                       <td className="py-3 font-bold text-slate-850 dark:text-slate-100 flex items-center gap-1.5">
                         <Calendar size={14} className="text-slate-400" />
                         {log.date}
+                        {(log.rainfall ?? 0) > 5 && (
+                          <span className="ml-1 px-1.5 py-0.5 rounded-full text-[8px] font-bold bg-blue-500/15 text-blue-500 border border-blue-500/20 flex items-center gap-0.5">
+                            <CloudRain size={8} />Heavy Rain
+                          </span>
+                        )}
                       </td>
                       <td className="py-3">
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${alertTheme} bg-slate-100/40 dark:bg-slate-900/40`}>

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, ReferenceLine
 } from 'recharts';
 import { BarChart3 } from 'lucide-react';
 
@@ -133,6 +133,45 @@ export const Analytics: React.FC = () => {
   const consumptionData = Object.values(consumptionMap)
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 5);
+
+  // 5. Expense category donut data
+  const seedCost = activeCrop?.seed_nursery_cost ?? 0;
+  const getCatTotal = (cat: string) => {
+    let sum = cropExpenses.filter(e => e.category === cat).reduce((s, e) => s + Number(e.amount), 0);
+    if (cat === 'inventory') sum += cropUsages.reduce((s, u) => s + Number(u.cost), 0);
+    return sum;
+  };
+  const expCatData = [
+    { name: 'Labour', value: getCatTotal('labour'), color: '#10b981' },
+    { name: 'Inventory & Materials', value: getCatTotal('inventory'), color: '#2dd4bf' },
+    { name: 'Transport', value: getCatTotal('transport'), color: '#fbbf24' },
+    { name: 'Packaging', value: getCatTotal('packaging'), color: '#6366f1' },
+    { name: 'Fuel', value: getCatTotal('personal_vehicle_fuel'), color: '#fb923c' },
+    { name: 'Miscellaneous', value: getCatTotal('miscellaneous'), color: '#94a3b8' },
+    ...(seedCost > 0 ? [{ name: 'Seed / Nursery', value: seedCost, color: '#059669' }] : []),
+  ].filter(d => d.value > 0);
+
+  // 6. Cumulative Revenue vs Cost trend with net profit
+  const cumulativeTrend = (() => {
+    const events: Array<{ date: string; rev: number; exp: number }> = [
+      ...cropHarvests.map(h => ({ date: h.date, rev: Number(h.revenue), exp: 0 })),
+      ...cropExpenses.map(e => ({ date: e.date, rev: 0, exp: Number(e.amount) })),
+      ...cropUsages.map(u => ({ date: u.date, rev: 0, exp: Number(u.cost) })),
+      ...(seedCost > 0 && activeCrop ? [{ date: activeCrop.start_date, rev: 0, exp: seedCost }] : []),
+    ];
+    const grouped: Record<string, { rev: number; exp: number }> = {};
+    events.forEach(ev => {
+      if (!grouped[ev.date]) grouped[ev.date] = { rev: 0, exp: 0 };
+      grouped[ev.date].rev += ev.rev;
+      grouped[ev.date].exp += ev.exp;
+    });
+    let cumRev = 0, cumExp = 0;
+    return Object.keys(grouped).sort().map(date => {
+      cumRev += grouped[date].rev;
+      cumExp += grouped[date].exp;
+      return { date, revenue: parseFloat(cumRev.toFixed(2)), expenses: parseFloat(cumExp.toFixed(2)), net: parseFloat((cumRev - cumExp).toFixed(2)) };
+    });
+  })();
 
   // Custom tooltips for Recharts (Glassmorphism look)
   const CustomChartTooltip = ({ active, payload, label }: any) => {
@@ -330,7 +369,83 @@ export const Analytics: React.FC = () => {
 
       </div>
 
-      {/* 4. INVENTORY CONSUMPTION CHART */}
+      {/* 4. EXPENSE CATEGORY DONUT + CUMULATIVE REV vs COST */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Expense Category Donut */}
+        <div className="glass rounded-2xl p-5 border border-slate-200/30 dark:border-slate-800/30 shadow-sm space-y-4">
+          <div>
+            <h4 className="font-heading font-bold text-slate-700 dark:text-slate-200 text-sm">Expense Category Breakdown</h4>
+            <p className="text-[10px] text-slate-400">Distribution of operating costs across all expenditure categories.</p>
+          </div>
+          {expCatData.length > 0 ? (
+            <div className="w-full h-64 flex flex-col sm:flex-row items-center justify-around gap-4 text-xs">
+              <div className="w-44 h-44 shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={expCatData} cx="50%" cy="50%" innerRadius={38} outerRadius={68} paddingAngle={3} dataKey="value">
+                      {expCatData.map((entry, i) => (
+                        <Cell key={i} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<CustomChartTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="space-y-2 font-bold text-slate-500 dark:text-slate-400 shrink-0">
+                {expCatData.map(item => (
+                  <div key={item.name} className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                    <span className="text-[10px]">{item.name}: <b className="text-slate-700 dark:text-slate-200">₹{item.value.toLocaleString()}</b></span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="py-24 text-center text-slate-400 italic text-xs">No expense data recorded yet.</div>
+          )}
+        </div>
+
+        {/* Cumulative Revenue vs Cost with Break-Even */}
+        <div className="glass rounded-2xl p-5 border border-slate-200/30 dark:border-slate-800/30 shadow-sm space-y-4">
+          <div>
+            <h4 className="font-heading font-bold text-slate-700 dark:text-slate-200 text-sm">Cumulative P&L Trajectory</h4>
+            <p className="text-[10px] text-slate-400">Running revenue vs. cost — net profit line crosses break-even at ₹0.</p>
+          </div>
+          {cumulativeTrend.length > 0 ? (
+            <div className="w-full h-64 text-xs font-bold">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={cumulativeTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="cumRev" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="cumExp" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.2}/>
+                      <stop offset="95%" stopColor="#f43f5e" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" className="dark:hidden" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" className="hidden dark:block" />
+                  <XAxis dataKey="date" stroke="#94a3b8" />
+                  <YAxis stroke="#94a3b8" />
+                  <Tooltip content={<CustomChartTooltip />} />
+                  <Legend iconType="circle" />
+                  <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" label={{ value: 'Break-Even', fill: '#94a3b8', fontSize: 9 }} />
+                  <Area name="Cumulative Revenue (₹)" type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#cumRev)" />
+                  <Area name="Cumulative Expenses (₹)" type="monotone" dataKey="expenses" stroke="#f43f5e" strokeWidth={2} fill="url(#cumExp)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="py-24 text-center text-slate-400 italic text-xs">No financial data to build P&L trajectory.</div>
+          )}
+        </div>
+
+      </div>
+
+      {/* 5. INVENTORY CONSUMPTION CHART */}
       <div className="glass rounded-2xl p-5 border border-slate-200/30 dark:border-slate-800/30 shadow-sm space-y-4">
         <div>
           <h4 className="font-heading font-bold text-slate-700 dark:text-slate-200 text-sm">Top 5 consumed Fertilizers / Sprays</h4>

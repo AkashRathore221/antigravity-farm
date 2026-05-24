@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import type { UsageType, UnitType } from '../../db/types';
 import { ClipboardList, PlusCircle, Trash2, Search, RefreshCw } from 'lucide-react';
@@ -23,6 +23,12 @@ export const UsageLogs: React.FC = () => {
     repeat_schedule: false,
     repeat_interval_days: '7'
   });
+
+  useEffect(() => {
+    if (showAddForm && activeCrop?.area_covered) {
+      setFormData(prev => ({ ...prev, area_treated: String(activeCrop.area_covered) }));
+    }
+  }, [showAddForm, activeCrop?.area_covered]);
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import type { Crop } from '../../db/types';
-import { Sprout, Trash2, Search } from 'lucide-react';
+import { Sprout, Trash2, Search, ChevronDown, ChevronUp } from 'lucide-react';
 
 export const CropLifecycle: React.FC = () => {
   const { crops, harvests, expenses, usageLogs, startCrop, endCrop, deleteCrop } = useAppStore();
@@ -10,6 +10,8 @@ export const CropLifecycle: React.FC = () => {
   
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
+  // Expanded archived crop id
+  const [expandedCropId, setExpandedCropId] = useState<string | null>(null);
 
   // Start Crop form state
   const [formData, setFormData] = useState({
@@ -22,6 +24,7 @@ export const CropLifecycle: React.FC = () => {
     area_covered: 1000,
     num_plants: 3200,
     seed_nursery_cost: 0,
+    target_yield_kg: 0,
     notes: ''
   });
 
@@ -79,6 +82,7 @@ export const CropLifecycle: React.FC = () => {
       area_covered: Number(formData.area_covered),
       num_plants: Number(formData.num_plants),
       seed_nursery_cost: Number(formData.seed_nursery_cost),
+      target_yield_kg: Number(formData.target_yield_kg),
       notes: formData.notes
     });
     setIsSubmitConfirm(false);
@@ -149,6 +153,24 @@ export const CropLifecycle: React.FC = () => {
                   <p className="text-slate-600 dark:text-slate-400 leading-relaxed">{activeCrop.notes}</p>
                 </div>
               )}
+
+              {(activeCrop.target_yield_kg ?? 0) > 0 && (() => {
+                const stats = getCropStats(activeCrop);
+                const target = activeCrop.target_yield_kg ?? 0;
+                const pct = Math.min(100, (stats.yieldTotal / target) * 100);
+                return (
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between font-semibold">
+                      <span className="text-slate-500 dark:text-slate-400">Yield Progress</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">{stats.yieldTotal.toLocaleString()} / {target.toLocaleString()} kg</span>
+                    </div>
+                    <div className="w-full h-3 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="text-right text-[10px] text-emerald-500 font-bold">{pct.toFixed(1)}% of target</div>
+                  </div>
+                );
+              })()}
             </div>
           ) : (
             /* Start Crop Form */
@@ -226,7 +248,7 @@ export const CropLifecycle: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
                   <div className="space-y-1">
                     <label className="font-bold text-slate-500 dark:text-slate-400">Seed Company Breeder</label>
                     <input
@@ -267,6 +289,18 @@ export const CropLifecycle: React.FC = () => {
                       step="any"
                       value={formData.seed_nursery_cost}
                       onChange={(e) => setFormData({ ...formData, seed_nursery_cost: Number(e.target.value) })}
+                      className="w-full bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/40 dark:border-slate-800/40 rounded-xl px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-500 dark:text-slate-400">Target Yield (kg) <span className="font-normal text-slate-400/60">optional</span></label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      placeholder="e.g. 15000"
+                      value={formData.target_yield_kg || ''}
+                      onChange={(e) => setFormData({ ...formData, target_yield_kg: Number(e.target.value) })}
                       className="w-full bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/40 dark:border-slate-800/40 rounded-xl px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
@@ -375,16 +409,25 @@ export const CropLifecycle: React.FC = () => {
                         {crop.name}
                       </h4>
                     </div>
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Caution: Deleting this archived crop "${crop.name}" will completely clear all its historical calculations. Continue?`)) {
-                          deleteCrop(crop.id);
-                        }
-                      }}
-                      className="p-2 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900/60 self-end sm:self-auto"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="flex items-center gap-2 self-end sm:self-auto">
+                      <button
+                        onClick={() => setExpandedCropId(expandedCropId === crop.id ? null : crop.id)}
+                        className="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all flex items-center gap-1"
+                      >
+                        {expandedCropId === crop.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        {expandedCropId === crop.id ? 'Hide' : 'View Details'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Caution: Deleting this archived crop "${crop.name}" will completely clear all its historical calculations. Continue?`)) {
+                            deleteCrop(crop.id);
+                          }
+                        }}
+                        className="p-2 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900/60"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 md:grid-cols-6 gap-4 text-xs font-semibold text-center">
@@ -415,6 +458,80 @@ export const CropLifecycle: React.FC = () => {
                       </span>
                     </div>
                   </div>
+
+                  {expandedCropId === crop.id && (() => {
+                    const cropHarvestsExp = harvests.filter(h => h.crop_id === crop.id);
+                    const cropExpensesExp = expenses.filter(e => e.crop_id === crop.id);
+                    const cropUsagesExp = usageLogs.filter(u => u.crop_id === crop.id);
+                    return (
+                      <div className="space-y-4 pt-4 border-t border-slate-200/20 dark:border-slate-800/20 text-xs">
+                        {/* Harvest Logs */}
+                        <div>
+                          <h5 className="font-bold text-slate-600 dark:text-slate-300 mb-2">Harvest Logs ({cropHarvestsExp.length})</h5>
+                          {cropHarvestsExp.length > 0 ? (
+                            <div className="overflow-x-auto no-scrollbar">
+                              <table className="w-full text-left border-collapse min-w-[500px]">
+                                <thead><tr className="text-slate-400 uppercase text-[10px] font-bold border-b border-slate-200/20 dark:border-slate-800/20">
+                                  <th className="py-1.5">Date</th><th>A (kg)</th><th>B (kg)</th><th>Waste</th><th>Buyer</th><th>Revenue</th>
+                                </tr></thead>
+                                <tbody className="divide-y divide-slate-200/10">
+                                  {cropHarvestsExp.map(h => (
+                                    <tr key={h.id} className="text-slate-600 dark:text-slate-400 font-semibold">
+                                      <td className="py-1.5">{h.date}</td><td>{h.weight_grade_a}</td><td>{h.weight_grade_b}</td><td>{h.wastage}</td>
+                                      <td>{h.buyer_name}</td><td className="text-emerald-500 font-bold">₹{h.revenue.toFixed(0)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : <p className="text-slate-400 italic">No harvest logs.</p>}
+                        </div>
+                        {/* Expense Logs */}
+                        <div>
+                          <h5 className="font-bold text-slate-600 dark:text-slate-300 mb-2">Expense Logs ({cropExpensesExp.length})</h5>
+                          {cropExpensesExp.length > 0 ? (
+                            <div className="overflow-x-auto no-scrollbar">
+                              <table className="w-full text-left border-collapse min-w-[400px]">
+                                <thead><tr className="text-slate-400 uppercase text-[10px] font-bold border-b border-slate-200/20 dark:border-slate-800/20">
+                                  <th className="py-1.5">Date</th><th>Category</th><th>Amount</th><th>Notes</th>
+                                </tr></thead>
+                                <tbody className="divide-y divide-slate-200/10">
+                                  {cropExpensesExp.map(e => (
+                                    <tr key={e.id} className="text-slate-600 dark:text-slate-400 font-semibold">
+                                      <td className="py-1.5">{e.date}</td><td className="capitalize">{e.category.replace('_',' ')}</td>
+                                      <td className="text-rose-500 font-bold">₹{e.amount.toFixed(0)}</td><td className="text-slate-400 max-w-[160px] truncate">{e.notes}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : <p className="text-slate-400 italic">No expense logs.</p>}
+                        </div>
+                        {/* Usage Logs */}
+                        <div>
+                          <h5 className="font-bold text-slate-600 dark:text-slate-300 mb-2">Usage Logs ({cropUsagesExp.length})</h5>
+                          {cropUsagesExp.length > 0 ? (
+                            <div className="overflow-x-auto no-scrollbar">
+                              <table className="w-full text-left border-collapse min-w-[400px]">
+                                <thead><tr className="text-slate-400 uppercase text-[10px] font-bold border-b border-slate-200/20 dark:border-slate-800/20">
+                                  <th className="py-1.5">Date</th><th>Product</th><th>Qty</th><th>Type</th><th>Cost</th>
+                                </tr></thead>
+                                <tbody className="divide-y divide-slate-200/10">
+                                  {cropUsagesExp.map(u => (
+                                    <tr key={u.id} className="text-slate-600 dark:text-slate-400 font-semibold">
+                                      <td className="py-1.5">{u.date}</td><td className="max-w-[140px] truncate">{u.product_name}</td>
+                                      <td>{u.quantity_used} {u.unit}</td><td className="capitalize">{u.type}</td>
+                                      <td className="text-amber-500 font-bold">₹{u.cost.toFixed(0)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : <p className="text-slate-400 italic">No usage logs.</p>}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

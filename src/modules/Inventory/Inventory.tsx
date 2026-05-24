@@ -14,6 +14,19 @@ export const Inventory: React.FC = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   // Editing: null = adding new, string = editing existing item id
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Supplier autocomplete
+  const [supplierSuggestions, setSupplierSuggestions] = useState<string[]>([]);
+
+  const uniqueSuppliers = Array.from(new Set(inventory.map(i => i.supplier).filter(Boolean)));
+
+  const handleSupplierChange = (val: string) => {
+    setFormData({ ...formData, supplier: val });
+    if (val.length >= 1) {
+      setSupplierSuggestions(uniqueSuppliers.filter(s => s.toLowerCase().includes(val.toLowerCase())));
+    } else {
+      setSupplierSuggestions([]);
+    }
+  };
 
   // New item form state
   const [formData, setFormData] = useState({
@@ -214,15 +227,30 @@ export const Inventory: React.FC = () => {
                   className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                 />
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1 relative">
                 <label className="text-slate-500 dark:text-slate-400">Supplier Name</label>
                 <input
                   type="text"
                   placeholder="e.g. Agro Supplies Corp"
                   value={formData.supplier}
-                  onChange={(e) => setFormData({...formData, supplier: e.target.value})}
+                  onChange={(e) => handleSupplierChange(e.target.value)}
+                  onBlur={() => setTimeout(() => setSupplierSuggestions([]), 150)}
                   className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                 />
+                {supplierSuggestions.length > 0 && (
+                  <div className="absolute top-full mt-1 left-0 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl z-50 overflow-hidden">
+                    {supplierSuggestions.map((s, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onMouseDown={() => { setFormData({ ...formData, supplier: s }); setSupplierSuggestions([]); }}
+                        className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400 border-b border-slate-100 dark:border-slate-800 last:border-0 transition-colors"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

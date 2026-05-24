@@ -5,6 +5,9 @@ import {
   Activity, PlusCircle,
   ChevronUp, ChevronDown, CalendarCheck
 } from 'lucide-react';
+import {
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip
+} from 'recharts';
 
 interface DashboardProps {
   setActiveTab: (tab: string) => void;
@@ -132,6 +135,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
   const harvestSparkline = getSparklinePath(lastCropsHarvests, 140, 32);
   const expenseSparkline = getSparklinePath(lastCropsExpenses, 140, 32);
 
+  // Cumulative revenue vs. expense trend for active crop
+  const buildCumulativeTrend = () => {
+    if (!activeCrop) return [];
+    const events: Array<{ date: string; revDelta: number; expDelta: number }> = [
+      ...harvests.filter(h => h.crop_id === activeCrop.id).map(h => ({ date: h.date, revDelta: Number(h.revenue), expDelta: 0 })),
+      ...expenses.filter(e => e.crop_id === activeCrop.id).map(e => ({ date: e.date, revDelta: 0, expDelta: Number(e.amount) })),
+      ...usageLogs.filter(u => u.crop_id === activeCrop.id).map(u => ({ date: u.date, revDelta: 0, expDelta: Number(u.cost) })),
+    ];
+    if ((activeCrop.seed_nursery_cost ?? 0) > 0)
+      events.push({ date: activeCrop.start_date, revDelta: 0, expDelta: activeCrop.seed_nursery_cost ?? 0 });
+    events.sort((a, b) => a.date.localeCompare(b.date));
+    const grouped: Record<string, { rev: number; exp: number }> = {};
+    events.forEach(ev => {
+      if (!grouped[ev.date]) grouped[ev.date] = { rev: 0, exp: 0 };
+      grouped[ev.date].rev += ev.revDelta;
+      grouped[ev.date].exp += ev.expDelta;
+    });
+    let cumRev = 0, cumExp = 0;
+    return Object.keys(grouped).sort().map(date => {
+      cumRev += grouped[date].rev;
+      cumExp += grouped[date].exp;
+      return { date, revenue: parseFloat(cumRev.toFixed(2)), expenses: parseFloat(cumExp.toFixed(2)) };
+    });
+  };
+  const cumulativeTrend = buildCumulativeTrend();
+
+  // Last archived crop for no-crop empty state
+  const lastArchivedCrop = crops
+    .filter(c => c.status === 'archived')
+    .sort((a, b) => (b.end_date ?? '').localeCompare(a.end_date ?? ''))[0] ?? null;
+  const lastArchivedStats = lastArchivedCrop ? (() => {
+    const ch = harvests.filter(h => h.crop_id === lastArchivedCrop.id);
+    const ce = expenses.filter(e => e.crop_id === lastArchivedCrop.id);
+    const cu = usageLogs.filter(u => u.crop_id === lastArchivedCrop.id);
+    const yld = ch.reduce((s, h) => s + Number(h.weight_total), 0);
+    const rev = ch.reduce((s, h) => s + Number(h.revenue), 0);
+    const exp = ce.reduce((s, e) => s + Number(e.amount), 0) + cu.reduce((s, u) => s + Number(u.cost), 0) + (lastArchivedCrop.seed_nursery_cost ?? 0);
+    const start = new Date(lastArchivedCrop.start_date);
+    const end = lastArchivedCrop.end_date ? new Date(lastArchivedCrop.end_date) : new Date();
+    const dur = Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    return { yield: yld, revenue: rev, expenses: exp, profit: rev - exp, costKg: yld > 0 ? exp / yld : 0, duration: dur };
+  })() : null;
+
   // Widget Reordering logic
   const moveWidget = (index: number, direction: 'up' | 'down') => {
     const order = [...settings.widgetsOrder];
@@ -221,19 +267,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
                 </div>
               </>
             ) : (
-              <div className="w-full text-center py-6 space-y-4">
-                <Sprout size={48} className="mx-auto text-slate-300 dark:text-slate-700 stroke-[1.5]" />
-                <div>
-                  <h4 className="text-lg font-bold text-slate-700 dark:text-slate-300">No Active Crop Cycle Found</h4>
-                  <p className="text-sm text-slate-400 max-w-md mx-auto">Start a fresh crop record keeping ledger to unlock cucumber live financials, yield grids, alerts and VPD advisory tracking.</p>
+              <div className="w-full space-y-4 py-4">
+                {lastArchivedCrop && lastArchivedStats ? (
+                  <div className="space-y-3">
+                    <div className="text-center">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Last Completed Cycle</span>
+                      <h4 className="text-base font-bold text-slate-700 dark:text-slate-300 mt-0.5">{lastArchivedCrop.name}</h4>
+                      <span className="text-xs text-slate-400">{lastArchivedCrop.variety} &bull; {lastArchivedStats.duration} days</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-center">
+                      <div className="bg-slate-100/50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-200/20">
+                        <span className="text-slate-400 block font-bold text-[10px] uppercase">Total Yield</span>
+                        <span className="font-extrabold text-slate-700 dark:text-slate-200 text-base">{lastArchivedStats.yield.toLocaleString()} kg</span>
+                      </div>
+                      <div className="bg-slate-100/50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-200/20">
+                        <span className="text-slate-400 block font-bold text-[10px] uppercase">Net Profit</span>
+                        <span className={`font-extrabold text-base ${lastArchivedStats.profit >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>₹{lastArchivedStats.profit.toFixed(0)}</span>
+                      </div>
+                      <div className="bg-slate-100/50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-200/20">
+                        <span className="text-slate-400 block font-bold text-[10px] uppercase">Revenue</span>
+                        <span className="font-extrabold text-slate-700 dark:text-slate-200 text-base">₹{lastArchivedStats.revenue.toFixed(0)}</span>
+                      </div>
+                      <div className="bg-slate-100/50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-200/20">
+                        <span className="text-slate-400 block font-bold text-[10px] uppercase">Cost / kg</span>
+                        <span className="font-extrabold text-slate-700 dark:text-slate-200 text-base">₹{lastArchivedStats.costKg.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <Sprout size={48} className="mx-auto text-slate-300 dark:text-slate-700 stroke-[1.5]" />
+                    <h4 className="text-lg font-bold text-slate-700 dark:text-slate-300 mt-2">No Active Crop Cycle Found</h4>
+                    <p className="text-sm text-slate-400 max-w-md mx-auto">Start a fresh crop record keeping ledger to unlock cucumber live financials, yield grids, alerts and VPD advisory tracking.</p>
+                  </div>
+                )}
+                <div className="text-center">
+                  <button
+                    onClick={() => setActiveTab('cropLifecycle')}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold text-sm shadow-md inline-flex items-center gap-2"
+                  >
+                    <PlusCircle size={16} />
+                    Start Active Crop Cycle
+                  </button>
                 </div>
-                <button
-                  onClick={() => setActiveTab('cropLifecycle')}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold text-sm shadow-md flex items-center gap-2 mx-auto"
-                >
-                  <PlusCircle size={16} />
-                  Start Active Crop Cycle
-                </button>
               </div>
             )}
           </div>
@@ -306,42 +382,67 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
       case 'miniCharts':
         if (!activeCrop) return null;
         return (
-          <div key={widgetId} className="group relative grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div key={widgetId} className="group relative space-y-4">
             {widgetControls}
-            
-            <div className="glass rounded-2xl p-4 border border-slate-200/30 dark:border-slate-800/30 shadow-sm flex items-center justify-between gap-4">
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-slate-400 block">Yield Sparkline</span>
-                <span className="text-lg font-bold text-slate-800 dark:text-slate-100">Last 6 harvests</span>
-                <span className="text-[10px] text-emerald-500 block font-semibold">&bull; Peak volume active</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="glass rounded-2xl p-4 border border-slate-200/30 dark:border-slate-800/30 shadow-sm flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <span className="text-xs font-bold text-slate-400 block">Yield Sparkline</span>
+                  <span className="text-lg font-bold text-slate-800 dark:text-slate-100">Last 6 harvests</span>
+                  <span className="text-[10px] text-emerald-500 block font-semibold">&bull; Peak volume active</span>
+                </div>
+                <div className="w-36 h-10 shrink-0">
+                  {lastCropsHarvests.length > 1 ? (
+                    <svg className="w-full h-full text-emerald-500 overflow-visible" strokeWidth="2.5" fill="none">
+                      <path d={harvestSparkline} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : (
+                    <span className="text-xs text-slate-400 italic">No trend data yet</span>
+                  )}
+                </div>
               </div>
-              <div className="w-36 h-10 shrink-0">
-                {lastCropsHarvests.length > 1 ? (
-                  <svg className="w-full h-full text-emerald-500 overflow-visible" strokeWidth="2.5" fill="none">
-                    <path d={harvestSparkline} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                ) : (
-                  <span className="text-xs text-slate-400 italic">No trend data yet</span>
-                )}
+
+              <div className="glass rounded-2xl p-4 border border-slate-200/30 dark:border-slate-800/30 shadow-sm flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <span className="text-xs font-bold text-slate-400 block">Expense Outlay</span>
+                  <span className="text-lg font-bold text-slate-800 dark:text-slate-100">Operation Ledger</span>
+                  <span className="text-[10px] text-amber-500 block font-semibold">&bull; Drip inputs major</span>
+                </div>
+                <div className="w-36 h-10 shrink-0">
+                  {lastCropsExpenses.length > 1 ? (
+                    <svg className="w-full h-full text-amber-500 overflow-visible" strokeWidth="2.5" fill="none">
+                      <path d={expenseSparkline} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : (
+                    <span className="text-xs text-slate-400 italic">No trend data yet</span>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="glass rounded-2xl p-4 border border-slate-200/30 dark:border-slate-800/30 shadow-sm flex items-center justify-between gap-4">
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-slate-400 block">Expense Outlay</span>
-                <span className="text-lg font-bold text-slate-800 dark:text-slate-100">Operation Ledger</span>
-                <span className="text-[10px] text-amber-500 block font-semibold">&bull; Drip inputs major</span>
+            {cumulativeTrend.length > 1 && (
+              <div className="glass rounded-2xl p-4 border border-slate-200/30 dark:border-slate-800/30 shadow-sm space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Revenue vs. Expenses (Cumulative)</span>
+                  <div className="flex items-center gap-3 text-[10px] font-bold">
+                    <span className="flex items-center gap-1 text-emerald-500"><span className="w-3 h-0.5 bg-emerald-500 inline-block rounded" />Revenue</span>
+                    <span className="flex items-center gap-1 text-rose-500"><span className="w-3 h-0.5 bg-rose-500 inline-block rounded" />Expenses</span>
+                  </div>
+                </div>
+                <div className="w-full h-36">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={cumulativeTrend} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 9 }} />
+                      <YAxis stroke="#94a3b8" tick={{ fontSize: 9 }} />
+                      <Tooltip formatter={(v) => `₹${Number(v).toLocaleString()}`} labelStyle={{ fontSize: 10 }} contentStyle={{ fontSize: 11 }} />
+                      <Line type="monotone" name="Revenue" dataKey="revenue" stroke="#10b981" strokeWidth={2} dot={false} />
+                      <Line type="monotone" name="Expenses" dataKey="expenses" stroke="#f43f5e" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
-              <div className="w-36 h-10 shrink-0">
-                {lastCropsExpenses.length > 1 ? (
-                  <svg className="w-full h-full text-amber-500 overflow-visible" strokeWidth="2.5" fill="none">
-                    <path d={expenseSparkline} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                ) : (
-                  <span className="text-xs text-slate-400 italic">No trend data yet</span>
-                )}
-              </div>
-            </div>
+            )}
           </div>
         );
 

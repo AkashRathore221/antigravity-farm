@@ -13,6 +13,7 @@ export interface Crop {
   area_covered: number; // in square meters
   num_plants: number;
   seed_nursery_cost: number; // total seed/nursery tray cost (₹)
+  target_yield_kg?: number; // target harvest volume goal (kg)
   notes: string;
   status: CropStatus;
   created_at: string;
@@ -113,6 +114,8 @@ export interface WeatherLog {
   sunset?: string;
   vpd?: number; // Vapor Pressure Deficit (kPa)
   dew_point?: number; // °C
+  temp_min?: number; // daily minimum temperature (°C)
+  temp_max?: number; // daily maximum temperature (°C)
   created_at: string;
 }
 
@@ -152,6 +155,14 @@ export interface AppSettings {
   supabaseUrl: string;
   supabaseAnonKey: string;
   isOnlineSyncEnabled: boolean;
+  farmProfile?: {
+    farmName: string;
+    ownerName: string;
+    farmCity: string;
+    farmLat?: number;
+    farmLng?: number;
+    totalAreaSqM: number;
+  };
 }
 
 export interface SyncQueueItem {

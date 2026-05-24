@@ -20,6 +20,7 @@ export const mockCrops: Crop[] = [
     area_covered: 1000,                    // 1000 sq meters (approx 10,000 sq ft)
     num_plants: 3200,                      // Standard high density
     seed_nursery_cost: 0,
+    target_yield_kg: 0,
     notes: 'Primary greenhouse, high-yield drip fertigation setup. Excellent vegetative growth observed.',
     status: 'active',
     created_at: new Date(getRelativeDate(-45)).toISOString()
@@ -37,6 +38,7 @@ export const mockCrops: Crop[] = [
     area_covered: 1000,
     num_plants: 3000,
     seed_nursery_cost: 0,
+    target_yield_kg: 0,
     notes: 'Successful winter batch. Lower yield due to fog in January but higher market prices.',
     status: 'archived',
     created_at: new Date('2025-10-15').toISOString()
@@ -500,5 +502,11 @@ export const defaultSettings: AppSettings = {
   },
   supabaseUrl: '',
   supabaseAnonKey: '',
-  isOnlineSyncEnabled: false
+  isOnlineSyncEnabled: false,
+  farmProfile: {
+    farmName: '',
+    ownerName: '',
+    farmCity: '',
+    totalAreaSqM: 0,
+  }
 };

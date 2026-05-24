@@ -4,19 +4,49 @@ import { supabase } from '../../lib/supabase';
 import {
   Layout, Sliders, Database, Trash2,
   ToggleLeft, ToggleRight, ArrowUp, ArrowDown, ShieldAlert,
-  RefreshCw, AlertCircle, User, LogOut, CheckCircle2, WifiOff, KeyRound
+  RefreshCw, AlertCircle, User, LogOut, CheckCircle2, WifiOff, KeyRound,
+  MapPin, Leaf
 } from 'lucide-react';
 
 export const Settings: React.FC = () => {
   const {
-    settings, toggleModule, toggleFeature,
-    updateWidgetOrder, resetAllData, authUser, signOut, pullFromSupabase, isSyncing, isOnline
+    settings, updateSettings, toggleModule, toggleFeature,
+    updateWidgetOrder, resetAllData, authUser, signOut, pullFromSupabase, isSyncing, isOnline,
+    crops, activeCropId, updateActiveCropParams
   } = useAppStore();
+
+  const activeCrop = crops.find(c => c.id === activeCropId);
 
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [resetPwLoading, setResetPwLoading] = useState(false);
   const [resetPwMsg, setResetPwMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Farm profile form state
+  const fp = settings.farmProfile;
+  const [farmName, setFarmName] = useState(fp?.farmName ?? '');
+  const [ownerName, setOwnerName] = useState(fp?.ownerName ?? '');
+  const [farmCity, setFarmCity] = useState(fp?.farmCity ?? '');
+  const [totalArea, setTotalArea] = useState(String(fp?.totalAreaSqM ?? ''));
+  const [farmLat, setFarmLat] = useState(String(fp?.farmLat ?? ''));
+  const [farmLng, setFarmLng] = useState(String(fp?.farmLng ?? ''));
+
+  const saveFarmProfile = () => {
+    updateSettings({
+      farmProfile: {
+        farmName,
+        ownerName,
+        farmCity,
+        totalAreaSqM: Number(totalArea) || 0,
+        farmLat: farmLat ? Number(farmLat) : undefined,
+        farmLng: farmLng ? Number(farmLng) : undefined,
+      }
+    });
+  };
+
+  // Active crop params form state
+  const [cropArea, setCropArea] = useState(String(activeCrop?.area_covered ?? ''));
+  const [cropPlants, setCropPlants] = useState(String(activeCrop?.num_plants ?? ''));
 
   const handleResetPassword = async () => {
     if (!authUser?.email) return;
@@ -91,7 +121,93 @@ export const Settings: React.FC = () => {
         
         {/* MODULES & SYSTEM FEATURES CONTROLLER */}
         <div className="xl:col-span-2 space-y-6">
-          
+
+          {/* Farm Identity & Location */}
+          <div className="glass-premium p-6 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 shadow-sm space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                <MapPin size={20} />
+              </div>
+              <div>
+                <h3 className="font-heading font-bold text-slate-800 dark:text-slate-100">Farm Identity & Location</h3>
+                <p className="text-xs text-slate-400 font-semibold mt-0.5">Set your farm's profile details. City is used for weather auto-fetch when GPS is unavailable.</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-semibold">
+              {([
+                { label: 'Farm Name', value: farmName, set: setFarmName, placeholder: 'e.g. Antigravity Polyhouse', type: 'text' },
+                { label: 'Owner / Manager', value: ownerName, set: setOwnerName, placeholder: 'e.g. Akash Rathore', type: 'text' },
+                { label: 'Nearest City (for Weather)', value: farmCity, set: setFarmCity, placeholder: 'e.g. Nashik', type: 'text' },
+                { label: 'Total Farm Area (m²)', value: totalArea, set: setTotalArea, placeholder: 'e.g. 4000', type: 'number' },
+                { label: 'Farm Latitude', value: farmLat, set: setFarmLat, placeholder: 'e.g. 20.0059', type: 'number' },
+                { label: 'Farm Longitude', value: farmLng, set: setFarmLng, placeholder: 'e.g. 73.7897', type: 'number' },
+              ] as Array<{ label: string; value: string; set: (v: string) => void; placeholder: string; type: string }>).map(({ label, value, set, placeholder, type }) => (
+                <div key={label} className="space-y-1">
+                  <label className="text-slate-400 text-[10px] uppercase tracking-wider">{label}</label>
+                  <input
+                    type={type}
+                    value={value}
+                    onChange={e => set(e.target.value)}
+                    placeholder={placeholder}
+                    step={type === 'number' ? 'any' : undefined}
+                    className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={saveFarmProfile}
+              className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold rounded-xl text-xs shadow-md transition-all"
+            >
+              Save Farm Profile
+            </button>
+          </div>
+
+          {/* Active Crop Parameters */}
+          {activeCrop && (
+            <div className="glass-premium p-6 rounded-2xl border border-emerald-500/20 shadow-sm space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  <Leaf size={20} />
+                </div>
+                <div>
+                  <h3 className="font-heading font-bold text-slate-800 dark:text-slate-100">Active Crop Parameters</h3>
+                  <p className="text-xs text-slate-400 font-semibold mt-0.5">Adjust growing area and plant count for <span className="text-emerald-500 font-bold">{activeCrop.name}</span>.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-xs font-semibold">
+                <div className="space-y-1">
+                  <label className="text-slate-400 text-[10px] uppercase tracking-wider">Area Covered (m²)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={cropArea}
+                    onChange={e => setCropArea(e.target.value)}
+                    className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-slate-400 text-[10px] uppercase tracking-wider">Number of Plants</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={cropPlants}
+                    onChange={e => setCropPlants(e.target.value)}
+                    className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={() => updateActiveCropParams(Number(cropArea) || 0, Number(cropPlants) || 0)}
+                className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold rounded-xl text-xs shadow-md transition-all"
+              >
+                Update Crop Parameters
+              </button>
+            </div>
+          )}
+
           {/* Module Toggles */}
           <div className="glass-premium p-6 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 shadow-sm space-y-4">
             <div className="flex items-center gap-3">

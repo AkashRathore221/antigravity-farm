@@ -64,6 +64,7 @@ interface AppState {
 
   // Expenses
   addExpense: (expenseData: Omit<Expense, 'id' | 'tenant_id' | 'created_at'>) => void;
+  updateExpense: (id: string, updates: Partial<Expense>) => void;
   deleteExpense: (id: string) => void;
 
   // Weather
@@ -75,6 +76,7 @@ interface AppState {
   toggleModule: (moduleKey: keyof AppSettings['modules']) => void;
   toggleFeature: (featureKey: keyof AppSettings['features']) => void;
   updateWidgetOrder: (newOrder: string[]) => void;
+  updateActiveCropParams: (area: number, numPlants: number) => void;
 }
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -484,6 +486,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     bgUpsert('expenses', newExpense, authUser?.id);
   },
 
+  updateExpense: (id, updates) => {
+    const { expenses, syncQueue, authUser } = get();
+    const updated = expenses.map(e => e.id === id ? { ...e, ...updates } : e);
+    const updatedItem = updated.find(e => e.id === id);
+    const newQueue = addToQueue(syncQueue, 'update', 'expenses', updatedItem);
+    set({ expenses: updated, syncQueue: newQueue });
+    saveLocal(get());
+    if (updatedItem) bgUpsert('expenses', updatedItem, authUser?.id);
+  },
+
   deleteExpense: (id) => {
     const { expenses, syncQueue, authUser } = get();
     const newQueue = addToQueue(syncQueue, 'delete', 'expenses', { id });
@@ -544,4 +556,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateWidgetOrder: (newOrder) => get().updateSettings({ widgetsOrder: newOrder }),
+
+  updateActiveCropParams: (area, numPlants) => {
+    const { crops, activeCropId, syncQueue, authUser } = get();
+    if (!activeCropId) return;
+    const updated = crops.map(c => c.id === activeCropId ? { ...c, area_covered: area, num_plants: numPlants } : c);
+    const updatedCrop = updated.find(c => c.id === activeCropId);
+    const newQueue = addToQueue(syncQueue, 'update', 'crops', updatedCrop);
+    set({ crops: updated, syncQueue: newQueue });
+    saveLocal(get());
+    if (updatedCrop) bgUpsert('crops', updatedCrop, authUser?.id);
+  },
 }));
