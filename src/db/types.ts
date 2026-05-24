@@ -12,6 +12,7 @@ export interface Crop {
   end_date?: string; // YYYY-MM-DD (present if status is 'archived')
   area_covered: number; // in square meters
   num_plants: number;
+  seed_nursery_cost: number; // total seed/nursery tray cost (₹)
   notes: string;
   status: CropStatus;
   created_at: string;
@@ -85,7 +86,7 @@ export interface Harvest {
   created_at: string;
 }
 
-export type ExpenseCategory = 'labour' | 'inventory' | 'transport' | 'packaging' | 'miscellaneous';
+export type ExpenseCategory = 'labour' | 'inventory' | 'transport' | 'packaging' | 'miscellaneous' | 'personal_vehicle_fuel';
 
 export interface Expense {
   id: string;

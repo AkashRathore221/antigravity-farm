@@ -40,8 +40,10 @@ export const Reports: React.FC = () => {
   // Manual direct ledger expenses (Labour, Transport, Packaging, Misc)
   const directExpenses = cropExpenses.reduce((sum, e) => sum + e.amount, 0);
   
-  // Combined actual cost of crop: direct manual expenses + consumed material cost
-  const totalExpenses = directExpenses + usageCost;
+  // Seed/nursery upfront cost from crop record
+  const seedCost = selectedCrop?.seed_nursery_cost ?? 0;
+  // Combined actual cost of crop: seed/nursery + direct manual expenses + consumed material cost
+  const totalExpenses = seedCost + directExpenses + usageCost;
   const netProfit = totalHarvestRevenue - totalExpenses;
   const roi = totalExpenses > 0 ? (netProfit / totalExpenses) * 100 : 0;
   
@@ -618,6 +620,22 @@ export const Reports: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Personal Vehicle Fuel */}
+                {cropExpenses.filter(e => e.category === 'personal_vehicle_fuel').length > 0 && (
+                  <div>
+                    <div className="flex justify-between font-bold mb-1">
+                      <span>Personal Vehicle Fuel</span>
+                      <span>₹{cropExpenses.filter(e => e.category === 'personal_vehicle_fuel').reduce((sum, e) => sum + e.amount, 0).toLocaleString()}</span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full bg-orange-400"
+                        style={{ width: `${totalExpenses > 0 ? (cropExpenses.filter(e => e.category === 'personal_vehicle_fuel').reduce((sum, e) => sum + e.amount, 0) / totalExpenses) * 100 : 0}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Miscellaneous */}
                 <div>
                   <div className="flex justify-between font-bold mb-1">
@@ -625,8 +643,8 @@ export const Reports: React.FC = () => {
                     <span>₹{(cropExpenses.filter(e => ['miscellaneous', 'inventory'].includes(e.category)).reduce((sum, e) => sum + e.amount, 0)).toLocaleString()}</span>
                   </div>
                   <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                    <div 
-                      className="h-full bg-slate-400" 
+                    <div
+                      className="h-full bg-slate-400"
                       style={{ width: `${totalExpenses > 0 ? (cropExpenses.filter(e => ['miscellaneous', 'inventory'].includes(e.category)).reduce((sum, e) => sum + e.amount, 0) / totalExpenses) * 100 : 0}%` }}
                     ></div>
                   </div>
@@ -641,6 +659,12 @@ export const Reports: React.FC = () => {
                   <span className="text-slate-400">Total Harvest Revenues</span>
                   <span className="text-slate-800 dark:text-slate-100 font-bold">₹{totalHarvestRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
+                {seedCost > 0 && (
+                  <div className="flex justify-between border-b border-slate-200 dark:border-slate-850 pb-2">
+                    <span className="text-slate-400">Seed / Nursery Cost</span>
+                    <span className="text-slate-800 dark:text-slate-100 font-bold">-₹{seedCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
                 <div className="flex justify-between border-b border-slate-200 dark:border-slate-850 pb-2">
                   <span className="text-slate-400">Manual Operating Costs (Ledger)</span>
                   <span className="text-slate-800 dark:text-slate-100 font-bold">-₹{directExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>

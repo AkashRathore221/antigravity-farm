@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import type { InventoryCategory, UnitType } from '../../db/types';
-import { Boxes, PlusCircle, Search, AlertTriangle, Trash2 } from 'lucide-react';
+import { Boxes, PlusCircle, Search, AlertTriangle, Trash2, Pencil } from 'lucide-react';
 
 export const Inventory: React.FC = () => {
   const { inventory, addInventory, updateInventory, deleteInventory, activeCropId } = useAppStore();
@@ -12,6 +12,8 @@ export const Inventory: React.FC = () => {
   
   // Modal/Form toggle
   const [showAddForm, setShowAddForm] = useState(false);
+  // Editing: null = adding new, string = editing existing item id
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // New item form state
   const [formData, setFormData] = useState({
@@ -26,6 +28,27 @@ export const Inventory: React.FC = () => {
     notes: ''
   });
 
+  const resetForm = () => {
+    setFormData({ name: '', brand: '', category: 'fertilizers', unit: 'kg', purchased_qty: '', price: '', supplier: '', low_stock_threshold: '', notes: '' });
+    setEditingId(null);
+  };
+
+  const startEdit = (item: typeof inventory[0]) => {
+    setFormData({
+      name: item.name,
+      brand: item.brand,
+      category: item.category,
+      unit: item.unit,
+      purchased_qty: String(item.purchased_qty),
+      price: String(item.price),
+      supplier: item.supplier,
+      low_stock_threshold: String(item.low_stock_threshold),
+      notes: item.notes,
+    });
+    setEditingId(item.id);
+    setShowAddForm(true);
+  };
+
   const categoriesList: { id: string; label: string }[] = [
     { id: 'all', label: 'All Inputs' },
     { id: 'fertilizers', label: 'Fertilizers' },
@@ -39,34 +62,36 @@ export const Inventory: React.FC = () => {
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    addInventory({
-      name: formData.name,
-      brand: formData.brand,
-      category: formData.category,
-      unit: formData.unit,
-      purchased_qty: Number(formData.purchased_qty),
-      remaining_qty: Number(formData.purchased_qty), // Initial equal to purchased
-      price: Number(formData.price),
-      purchase_date: new Date().toISOString().split('T')[0],
-      supplier: formData.supplier || 'Direct Local Market',
-      low_stock_threshold: Number(formData.low_stock_threshold),
-      notes: formData.notes
-    });
 
-    // Reset Form
-    setFormData({
-      name: '',
-      brand: '',
-      category: 'fertilizers',
-      unit: 'kg',
-      purchased_qty: '',
-      price: '',
-      supplier: '',
-      low_stock_threshold: '',
-      notes: ''
-    });
-    
+    if (editingId) {
+      updateInventory(editingId, {
+        name: formData.name,
+        brand: formData.brand,
+        category: formData.category,
+        unit: formData.unit,
+        purchased_qty: Number(formData.purchased_qty),
+        price: Number(formData.price),
+        supplier: formData.supplier || 'Direct Local Market',
+        low_stock_threshold: Number(formData.low_stock_threshold),
+        notes: formData.notes,
+      });
+    } else {
+      addInventory({
+        name: formData.name,
+        brand: formData.brand,
+        category: formData.category,
+        unit: formData.unit,
+        purchased_qty: Number(formData.purchased_qty),
+        remaining_qty: Number(formData.purchased_qty),
+        price: Number(formData.price),
+        purchase_date: new Date().toISOString().split('T')[0],
+        supplier: formData.supplier || 'Direct Local Market',
+        low_stock_threshold: Number(formData.low_stock_threshold),
+        notes: formData.notes,
+      });
+    }
+
+    resetForm();
     setShowAddForm(false);
   };
 
@@ -142,11 +167,11 @@ export const Inventory: React.FC = () => {
         {/* Action Button */}
         <div className="glass rounded-2xl p-5 border border-slate-200/30 dark:border-slate-800/30 shadow-sm flex items-center justify-center">
           <button
-            onClick={() => setShowAddForm(!showAddForm)}
+            onClick={() => { if (showAddForm) { resetForm(); setShowAddForm(false); } else { resetForm(); setShowAddForm(true); } }}
             className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-sm shadow-md shadow-emerald-500/10 flex items-center justify-center gap-2 transition-all"
           >
             <PlusCircle size={18} />
-            {showAddForm ? 'Close Add Form' : 'Register New Input Stock'}
+            {showAddForm ? 'Close Form' : 'Register New Input Stock'}
           </button>
         </div>
       </div>
@@ -155,7 +180,9 @@ export const Inventory: React.FC = () => {
       {showAddForm && (
         <div className="glass-premium rounded-2xl p-6 border border-slate-200/50 dark:border-slate-800/40 shadow-md animate-slide-up space-y-4">
           <div>
-            <h3 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-100">Register Chemical / Organic Fertilizers</h3>
+            <h3 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-100">
+              {editingId ? 'Edit Stock Record' : 'Register Chemical / Organic Fertilizers'}
+            </h3>
             <p className="text-xs text-slate-400">
               Purchases are cataloged in stock. 
               {activeCropId && <span className="font-bold text-emerald-500"> Note: This will automatically record an outlay expense for your active crop batch.</span>}
@@ -288,7 +315,7 @@ export const Inventory: React.FC = () => {
               type="submit"
               className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold rounded-xl shadow-md transition-all"
             >
-              Confirm and Log Purchased Outlay
+              {editingId ? 'Save Changes' : 'Confirm and Log Purchased Outlay'}
             </button>
           </form>
         </div>
@@ -408,6 +435,13 @@ export const Inventory: React.FC = () => {
                         className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-850 border border-slate-200/10 rounded-lg font-bold text-slate-600 dark:text-slate-400 text-sm"
                       >
                         +
+                      </button>
+                      <button
+                        onClick={() => startEdit(item)}
+                        className="p-1.5 text-slate-400 hover:text-emerald-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900"
+                        title="Edit this item"
+                      >
+                        <Pencil size={14} />
                       </button>
                       <button
                         onClick={() => {

@@ -21,6 +21,7 @@ export const CropLifecycle: React.FC = () => {
     expected_end_date: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     area_covered: 1000,
     num_plants: 3200,
+    seed_nursery_cost: 0,
     notes: ''
   });
 
@@ -37,7 +38,8 @@ export const CropLifecycle: React.FC = () => {
     
     const matExpense = cropUsages.reduce((sum, u) => sum + Number(u.cost), 0);
     const labExpense = cropExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
-    const totalExp = matExpense + labExpense;
+    const seedCost = crop.seed_nursery_cost ?? 0;
+    const totalExp = matExpense + labExpense + seedCost;
     
     const profit = revenue - totalExp;
     const costKg = yieldTotal > 0 ? totalExp / yieldTotal : 0;
@@ -76,6 +78,7 @@ export const CropLifecycle: React.FC = () => {
       expected_end_date: formData.expected_end_date,
       area_covered: Number(formData.area_covered),
       num_plants: Number(formData.num_plants),
+      seed_nursery_cost: Number(formData.seed_nursery_cost),
       notes: formData.notes
     });
     setIsSubmitConfirm(false);
@@ -223,7 +226,7 @@ export const CropLifecycle: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                   <div className="space-y-1">
                     <label className="font-bold text-slate-500 dark:text-slate-400">Seed Company Breeder</label>
                     <input
@@ -253,6 +256,17 @@ export const CropLifecycle: React.FC = () => {
                       min="1"
                       value={formData.num_plants}
                       onChange={(e) => setFormData({ ...formData, num_plants: Number(e.target.value) })}
+                      className="w-full bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/40 dark:border-slate-800/40 rounded-xl px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-500 dark:text-slate-400">Seed / Nursery Cost (₹)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={formData.seed_nursery_cost}
+                      onChange={(e) => setFormData({ ...formData, seed_nursery_cost: Number(e.target.value) })}
                       className="w-full bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/40 dark:border-slate-800/40 rounded-xl px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                     />
                   </div>

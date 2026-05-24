@@ -19,6 +19,7 @@ export const mockCrops: Crop[] = [
     expected_end_date: getRelativeDate(60), // Expected end in 60 days
     area_covered: 1000,                    // 1000 sq meters (approx 10,000 sq ft)
     num_plants: 3200,                      // Standard high density
+    seed_nursery_cost: 0,
     notes: 'Primary greenhouse, high-yield drip fertigation setup. Excellent vegetative growth observed.',
     status: 'active',
     created_at: new Date(getRelativeDate(-45)).toISOString()
@@ -35,6 +36,7 @@ export const mockCrops: Crop[] = [
     end_date: '2026-02-20',
     area_covered: 1000,
     num_plants: 3000,
+    seed_nursery_cost: 0,
     notes: 'Successful winter batch. Lower yield due to fog in January but higher market prices.',
     status: 'archived',
     created_at: new Date('2025-10-15').toISOString()

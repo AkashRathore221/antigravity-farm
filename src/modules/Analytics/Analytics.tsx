@@ -99,6 +99,21 @@ export const Analytics: React.FC = () => {
       dataMap[key].expense += Number(u.cost);
     });
 
+    // Add seed/nursery upfront cost on crop start date
+    if (activeCrop && (activeCrop.seed_nursery_cost ?? 0) > 0) {
+      let seedKey = activeCrop.start_date;
+      if (timeFilter === 'weekly') {
+        const d = new Date(activeCrop.start_date);
+        const firstDay = d.getDate() - d.getDay();
+        const weekDate = new Date(d.setDate(firstDay));
+        seedKey = weekDate.toISOString().split('T')[0];
+      } else if (timeFilter === 'monthly') {
+        seedKey = activeCrop.start_date.substring(0, 7);
+      }
+      if (!dataMap[seedKey]) dataMap[seedKey] = { date: seedKey, yield: 0, revenue: 0, expense: 0 };
+      dataMap[seedKey].expense += activeCrop.seed_nursery_cost ?? 0;
+    }
+
     // Sort chronologically
     return Object.values(dataMap).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   };

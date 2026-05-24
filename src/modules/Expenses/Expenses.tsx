@@ -50,8 +50,9 @@ export const Expenses: React.FC = () => {
   // General expenses
   const totalGeneralExpenses = activeExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
   
-  // Overall Combine
-  const totalExpenses = totalGeneralExpenses + totalUsageExpenses;
+  // Overall Combine (include upfront seed/nursery cost from crop record)
+  const seedCost = activeCrop?.seed_nursery_cost ?? 0;
+  const totalExpenses = totalGeneralExpenses + totalUsageExpenses + seedCost;
 
   // Days since transplant
   let daysSinceTransplant = 0;
@@ -84,14 +85,16 @@ export const Expenses: React.FC = () => {
   const catInventory = getCatTotal('inventory');
   const catTransport = getCatTotal('transport');
   const catPackaging = getCatTotal('packaging');
+  const catFuel = getCatTotal('personal_vehicle_fuel');
   const catMisc = getCatTotal('miscellaneous');
 
-  const catTotalSum = catLabour + catInventory + catTransport + catPackaging + catMisc;
+  const catTotalSum = catLabour + catInventory + catTransport + catPackaging + catFuel + catMisc + seedCost;
 
   const pctLabour = catTotalSum > 0 ? (catLabour / catTotalSum) * 100 : 0;
   const pctInventory = catTotalSum > 0 ? (catInventory / catTotalSum) * 100 : 0;
   const pctTransport = catTotalSum > 0 ? (catTransport / catTotalSum) * 100 : 0;
   const pctPackaging = catTotalSum > 0 ? (catPackaging / catTotalSum) * 100 : 0;
+  const pctFuel = catTotalSum > 0 ? (catFuel / catTotalSum) * 100 : 0;
   const pctMisc = catTotalSum > 0 ? (catMisc / catTotalSum) * 100 : 0;
 
   // Filter lists
@@ -164,6 +167,19 @@ export const Expenses: React.FC = () => {
           <h4 className="font-heading font-bold text-slate-700 dark:text-slate-300 text-xs">Greenhouse Expense Allocation Splits</h4>
           
           <div className="space-y-3 font-semibold text-xs text-slate-600 dark:text-slate-400">
+            {/* Seed / Nursery */}
+            {seedCost > 0 && (
+              <div className="space-y-1">
+                <div className="flex justify-between">
+                  <span>Seed / Nursery Upfront Cost</span>
+                  <span className="text-slate-800 dark:text-slate-200">₹{seedCost.toFixed(2)} ({catTotalSum > 0 ? ((seedCost / catTotalSum) * 100).toFixed(1) : 0}%)</span>
+                </div>
+                <div className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-600" style={{ width: `${catTotalSum > 0 ? (seedCost / catTotalSum) * 100 : 0}%` }}></div>
+                </div>
+              </div>
+            )}
+
             {/* Labour */}
             <div className="space-y-1">
               <div className="flex justify-between">
@@ -205,6 +221,17 @@ export const Expenses: React.FC = () => {
               </div>
               <div className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
                 <div className="h-full bg-indigo-500" style={{ width: `${pctPackaging}%` }}></div>
+              </div>
+            </div>
+
+            {/* Personal Vehicle Fuel */}
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span>Personal Vehicle Fuel</span>
+                <span className="text-slate-800 dark:text-slate-200">₹{catFuel.toFixed(2)} ({pctFuel.toFixed(1)}%)</span>
+              </div>
+              <div className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-orange-400" style={{ width: `${pctFuel}%` }}></div>
               </div>
             </div>
 
@@ -255,6 +282,7 @@ export const Expenses: React.FC = () => {
                 if (exp.category === 'transport') badgeStyle = 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/10';
                 if (exp.category === 'packaging') badgeStyle = 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/10';
                 if (exp.category === 'inventory') badgeStyle = 'bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/10';
+                if (exp.category === 'personal_vehicle_fuel') badgeStyle = 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/10';
                 if (exp.category === 'miscellaneous') badgeStyle = 'bg-slate-500/15 text-slate-500 dark:text-slate-450 border-slate-500/10';
 
                 return (
@@ -332,12 +360,13 @@ export const Expenses: React.FC = () => {
                   <option value="labour">Labour Manual Payroll Invoice</option>
                   <option value="transport">Transport & Vehicle Hire Fees</option>
                   <option value="packaging">Packaging Materials Outlays</option>
+                  <option value="personal_vehicle_fuel">Personal Vehicle Fuel</option>
                   <option value="miscellaneous">Miscellaneous Overheads</option>
                 </select>
               </div>
 
               <div className="space-y-1">
-                <label className="text-slate-500 dark:text-slate-400">Amount Charged ($)</label>
+                <label className="text-slate-500 dark:text-slate-400">Amount Charged (₹)</label>
                 <input
                   type="number"
                   required

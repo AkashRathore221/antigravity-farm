@@ -49,8 +49,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
     const cropUsages = usageLogs.filter(u => u.crop_id === activeCrop.id);
     totalUsageExpenses = cropUsages.reduce((sum, u) => sum + Number(u.cost), 0);
 
-    // Combine
-    totalExpenses = totalGeneralExpenses + totalUsageExpenses;
+    // Combine (include upfront seed/nursery cost from crop record)
+    totalExpenses = totalGeneralExpenses + totalUsageExpenses + (activeCrop.seed_nursery_cost ?? 0);
     netProfit = totalRevenue - totalExpenses;
     
     if (totalExpenses > 0) {

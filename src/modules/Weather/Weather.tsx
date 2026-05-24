@@ -1,8 +1,8 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import {
   CloudSun, Navigation, MapPin, Cloud, CloudRain, Sun, Wind,
-  Droplets, RefreshCw, AlertTriangle, Calendar, Thermometer, Trash2
+  Droplets, RefreshCw, AlertTriangle, Calendar, Thermometer
 } from 'lucide-react';
 
 interface GeoResult {
@@ -84,7 +84,7 @@ function getDayLabel(daysFromNow: number): string {
 }
 
 export const Weather: React.FC = () => {
-  const { weatherLogs, addWeatherLog, deleteWeatherLog } = useAppStore();
+  const { weatherLogs, addWeatherLog } = useAppStore();
 
   const [gpsLoading, setGpsLoading] = useState(false);
   const [apiLoading, setApiLoading] = useState(false);
@@ -98,6 +98,11 @@ export const Weather: React.FC = () => {
   const [searchResults, setSearchResults] = useState<GeoResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [loggedNow, setLoggedNow] = useState(false);
+
+  // Refs to access latest values inside intervals without stale closures
+  const activeCoordsRef = useRef({ lat: 0, lon: 0 });
+  const todayWeatherRef = useRef<TodayWeather | null>(null);
+  const autoSavedTodayRef = useRef(false);
 
   const fetchWeather = useCallback(async (lat: number, lon: number) => {
     setApiLoading(true);
@@ -130,7 +135,7 @@ export const Weather: React.FC = () => {
       const sunsetStr = daily.sunset?.[0] ? fmtIsoTime(daily.sunset[0] as string) : '06:50 PM';
       const vpd = calcVpd(cur.temperature_2m, cur.relative_humidity_2m);
 
-      setTodayWeather({
+      const newTodayWeather: TodayWeather = {
         temp: parseFloat((cur.temperature_2m ?? 0).toFixed(1)),
         tempMax: parseFloat(((daily.temperature_2m_max?.[0] as number) ?? maxTemp).toFixed(1)),
         tempMin: parseFloat(((daily.temperature_2m_min?.[0] as number) ?? minTemp).toFixed(1)),
@@ -146,7 +151,9 @@ export const Weather: React.FC = () => {
         sunrise: sunriseStr,
         sunset: sunsetStr,
         desc: wmoCodeToDesc((daily.weather_code?.[0] as number) ?? 0),
-      });
+      };
+      setTodayWeather(newTodayWeather);
+      todayWeatherRef.current = newTodayWeather;
 
       // 7-day forecast (indices 1–7)
       setForecast(
@@ -175,6 +182,7 @@ export const Weather: React.FC = () => {
       (pos) => {
         const lat = parseFloat(pos.coords.latitude.toFixed(4));
         const lon = parseFloat(pos.coords.longitude.toFixed(4));
+        activeCoordsRef.current = { lat, lon };
         setActiveCoords({ lat, lon });
         setHasCoords(true);
         setLocationName(`GPS: ${lat}° N, ${lon}° E`);
@@ -212,6 +220,7 @@ export const Weather: React.FC = () => {
       : `${result.name}, ${result.country}`;
     setLocationName(name);
     setSearchQuery(name);
+    activeCoordsRef.current = { lat: result.latitude, lon: result.longitude };
     setActiveCoords({ lat: result.latitude, lon: result.longitude });
     setHasCoords(true);
     setSearchResults([]);
@@ -237,6 +246,63 @@ export const Weather: React.FC = () => {
   };
 
   const vpdInfo = todayWeather ? vpdStatus(todayWeather.vpd) : null;
+
+  // Auto-fetch on mount (silent GPS) + 30-min refresh interval
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = parseFloat(pos.coords.latitude.toFixed(4));
+          const lon = parseFloat(pos.coords.longitude.toFixed(4));
+          activeCoordsRef.current = { lat, lon };
+          setActiveCoords({ lat, lon });
+          setHasCoords(true);
+          setLocationName(`GPS: ${lat}° N, ${lon}° E`);
+          setSearchQuery(`GPS: ${lat}° N, ${lon}° E`);
+          fetchWeather(lat, lon);
+        },
+        () => { /* silent — user can grant GPS manually */ }
+      );
+    }
+
+    const refreshInterval = setInterval(() => {
+      const c = activeCoordsRef.current;
+      if (c.lat !== 0 || c.lon !== 0) {
+        fetchWeather(c.lat, c.lon);
+      }
+    }, 30 * 60 * 1000);
+
+    return () => clearInterval(refreshInterval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 1 PM daily auto-save
+  useEffect(() => {
+    const checkInterval = setInterval(() => {
+      const now = new Date();
+      if (now.getHours() === 13 && !autoSavedTodayRef.current && todayWeatherRef.current) {
+        const tw = todayWeatherRef.current;
+        addWeatherLog({
+          date: new Date().toISOString().split('T')[0],
+          temp: tw.temp,
+          humidity: tw.humidity,
+          rainfall: tw.rainfall,
+          wind: tw.wind,
+          aqi: 0,
+          uv_index: tw.uvIndex,
+          sunrise: tw.sunrise,
+          sunset: tw.sunset,
+          dew_point: tw.dewPoint,
+        });
+        autoSavedTodayRef.current = true;
+      }
+      if (now.getHours() === 0) {
+        autoSavedTodayRef.current = false;
+      }
+    }, 60 * 1000);
+
+    return () => clearInterval(checkInterval);
+  }, [addWeatherLog]);
 
   return (
     <div className="space-y-6">
@@ -446,14 +512,14 @@ export const Weather: React.FC = () => {
               <thead>
                 <tr className="border-b border-slate-200/30 dark:border-slate-800/30 text-slate-400 font-bold uppercase tracking-wider">
                   <th className="py-2.5">Date</th>
+                  <th className="py-2.5">Condition</th>
                   <th className="py-2.5">Temp (°C)</th>
                   <th className="py-2.5">Humidity (%)</th>
                   <th className="py-2.5">VPD Index</th>
                   <th className="py-2.5">Dew Point</th>
                   <th className="py-2.5">Wind</th>
                   <th className="py-2.5">Rain</th>
-                  <th className="py-2.5">AQI / UV</th>
-                  <th className="py-2.5"></th>
+                  <th className="py-2.5">UV</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200/10 text-slate-700 dark:text-slate-350">
@@ -470,24 +536,20 @@ export const Weather: React.FC = () => {
                         <Calendar size={14} className="text-slate-400" />
                         {log.date}
                       </td>
+                      <td className="py-3">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${alertTheme} bg-slate-100/40 dark:bg-slate-900/40`}>
+                          {alertText}
+                        </span>
+                      </td>
                       <td className="py-3">{log.temp}°C</td>
                       <td className="py-3">{log.humidity}%</td>
                       <td className="py-3 font-extrabold font-heading text-slate-850 dark:text-slate-100">
-                        {log.vpd} kPa <span className={`text-[9px] block font-bold ${alertTheme}`}>({alertText})</span>
+                        {log.vpd} kPa
                       </td>
                       <td className="py-3">{log.dew_point}°C</td>
                       <td className="py-3">{log.wind} km/h</td>
                       <td className="py-3">{log.rainfall} mm</td>
-                      <td className="py-3">{log.aqi} AQI &bull; {log.uv_index} UV</td>
-                      <td className="py-3">
-                        <button
-                          onClick={() => deleteWeatherLog(log.id)}
-                          className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-500/10 transition-all"
-                          title="Delete this log entry"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </td>
+                      <td className="py-3">{log.uv_index}</td>
                     </tr>
                   );
                 })}

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../store/useAppStore';
+import { supabase } from '../../lib/supabase';
 import {
   Layout, Sliders, Database, Trash2,
   ToggleLeft, ToggleRight, ArrowUp, ArrowDown, ShieldAlert,
-  RefreshCw, AlertCircle, User, LogOut, CheckCircle2, WifiOff
+  RefreshCw, AlertCircle, User, LogOut, CheckCircle2, WifiOff, KeyRound
 } from 'lucide-react';
 
 export const Settings: React.FC = () => {
@@ -14,6 +15,21 @@ export const Settings: React.FC = () => {
 
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [resetPwLoading, setResetPwLoading] = useState(false);
+  const [resetPwMsg, setResetPwMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleResetPassword = async () => {
+    if (!authUser?.email) return;
+    setResetPwLoading(true);
+    setResetPwMsg(null);
+    const { error } = await supabase.auth.resetPasswordForEmail(authUser.email);
+    if (error) {
+      setResetPwMsg({ type: 'error', text: error.message });
+    } else {
+      setResetPwMsg({ type: 'success', text: 'Password reset email sent. Check your inbox.' });
+    }
+    setResetPwLoading(false);
+  };
 
   const moveWidget = (index: number, direction: 'up' | 'down') => {
     const newOrder = [...settings.widgetsOrder];
@@ -278,6 +294,30 @@ export const Settings: React.FC = () => {
                 <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
                 <span>{isSyncing ? 'Syncing…' : 'Pull Latest From Cloud'}</span>
               </button>
+
+              {/* Reset Password */}
+              {authUser && (
+                <div className="space-y-2">
+                  {resetPwMsg && (
+                    <div className={`flex items-center gap-1.5 text-xs font-semibold p-2 rounded-lg ${
+                      resetPwMsg.type === 'success'
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-red-500/10 text-red-500'
+                    }`}>
+                      <CheckCircle2 size={13} />
+                      <span>{resetPwMsg.text}</span>
+                    </div>
+                  )}
+                  <button
+                    onClick={handleResetPassword}
+                    disabled={resetPwLoading}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-indigo-500/10 dark:bg-slate-900 hover:border-indigo-500/30 border border-slate-200/50 dark:border-slate-800 text-slate-500 hover:text-indigo-500 font-bold rounded-xl text-xs transition-all disabled:opacity-50"
+                  >
+                    <KeyRound size={12} />
+                    <span>{resetPwLoading ? 'Sending…' : 'Reset Password via Email'}</span>
+                  </button>
+                </div>
+              )}
 
               {/* Sign out */}
               {authUser && (
