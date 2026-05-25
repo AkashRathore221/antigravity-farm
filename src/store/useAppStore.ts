@@ -33,7 +33,7 @@ interface AppState {
   authLoading: boolean;
 
   // Initialization
-  initializeStore: () => void;
+  initializeStore: () => Promise<void>;
   checkSession: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<string | null>;
   signUp: (email: string, password: string) => Promise<string | null>;
@@ -80,8 +80,8 @@ interface AppState {
 }
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
-const LS_KEY = 'polyhouse_farm_management_state';
-const USER_ID_KEY = 'antigravity_user_id';
+export const LS_KEY = 'polyhouse_farm_management_state';
+export const USER_ID_KEY = 'antigravity_user_id';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 function newId(prefix = 'id') {
@@ -231,7 +231,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Same user (or first-ever login) — re-hydrate from localStorage so
         // any records that didn't reach Supabase before the last logout are
         // visible to the recovery-push branch inside pullFromSupabase.
-        get().initializeStore();
+        await get().initializeStore();
       }
 
       localStorage.setItem(USER_ID_KEY, newUserId);
@@ -272,10 +272,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       alert('Some data could not be synced. Please reconnect and try again.');
     }
     // 4. Always clear in-memory Zustand state so the Auth screen renders.
+    //    Reset settings to defaults too — otherwise the next user inherits the
+    //    previous user's farmProfile, widgetOrder, and module toggles.
     set({
       authUser: null,
       crops: [], inventory: [], usageLogs: [], harvests: [],
       expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [],
+      settings: defaultSettings,
     });
   },
 
@@ -338,10 +341,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // ── Init ──────────────────────────────────────────────────────────────────────
-  initializeStore: () => {
+  initializeStore: async () => {
     try {
       const stored = localStorage.getItem(LS_KEY);
       if (stored) {
+        // localStorage has data — load it. Per-user safety is enforced by the
+        // USER_ID_KEY mismatch check in signIn / checkSession.
         const parsed = JSON.parse(stored);
         const active = parsed.crops?.find((c: Crop) => c.status === 'active')?.id ?? null;
         set({
@@ -355,8 +360,26 @@ export const useAppStore = create<AppState>((set, get) => ({
           syncQueue: parsed.syncQueue ?? [],
           activeCropId: active,
         });
+        return;
+      }
+
+      // No localStorage. Only seed mock data for genuinely new visitors —
+      // i.e. devices with NO authenticated session and NO prior login marker.
+      // For users with an active session (Google OAuth redirect callback, or
+      // refresh while logged in) we start with empty arrays so pullFromSupabase
+      // can populate real data without leaving mock rows that the user might
+      // edit and accidentally push into their own Supabase account.
+      const storedUserId = localStorage.getItem(USER_ID_KEY);
+      const { data: { session } } = await supabase.auth.getSession();
+      const hasAuthContext = !!storedUserId || !!session?.user;
+
+      if (hasAuthContext) {
+        set({
+          crops: [], inventory: [], usageLogs: [], harvests: [],
+          expenses: [], weatherLogs: [], settings: defaultSettings,
+          syncQueue: [], activeCropId: null,
+        });
       } else {
-        // Seed with mock data on first ever run (before any Supabase pull)
         const active = mockCrops.find(c => c.status === 'active')?.id ?? null;
         set({
           crops: mockCrops, inventory: mockInventory, usageLogs: mockUsageLogs,

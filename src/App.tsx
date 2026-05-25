@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useAppStore } from './store/useAppStore';
+import { useAppStore, LS_KEY, USER_ID_KEY } from './store/useAppStore';
+import { supabase } from './lib/supabase';
 import { Layout } from './components/Layout';
 import { Auth } from './modules/Auth/Auth';
 import { Sprout } from 'lucide-react';
@@ -22,10 +23,47 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
 
   useEffect(() => {
-    initializeStore();
-    checkSession().then(() => {
+    // Initial bootstrap. initializeStore is async (it consults the Supabase
+    // session before deciding whether to seed mock data) so we must await it
+    // before checkSession to keep the load order deterministic.
+    void (async () => {
+      await initializeStore();
+      await checkSession();
       const { authUser: user } = useAppStore.getState();
       if (user) pullFromSupabase();
+    })();
+
+    // Auth state listener — handles multi-tab logout, password reset / email
+    // confirmation flows, and the Google OAuth callback. Our own signIn /
+    // signOut actions also trigger these events, so we de-dupe by comparing
+    // against the current Zustand authUser.
+    const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        if (useAppStore.getState().authUser) {
+          useAppStore.setState({ authUser: null });
+        }
+      } else if (event === 'SIGNED_IN' && session?.user) {
+        const newUserId = session.user.id;
+        const currentAuthUser = useAppStore.getState().authUser;
+        // Already processed (our signIn / checkSession got here first).
+        if (currentAuthUser?.id === newUserId) return;
+
+        const storedUserId = localStorage.getItem(USER_ID_KEY);
+        if (storedUserId && storedUserId !== newUserId) {
+          // Different user — wipe prior data to prevent cross-account leak.
+          localStorage.removeItem(LS_KEY);
+          useAppStore.setState({
+            crops: [], inventory: [], usageLogs: [], harvests: [],
+            expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [],
+          });
+        }
+        localStorage.setItem(USER_ID_KEY, newUserId);
+        useAppStore.setState({ authUser: { id: newUserId, email: session.user.email ?? '' } });
+        void useAppStore.getState().pullFromSupabase();
+      }
+      // TOKEN_REFRESHED, INITIAL_SESSION, USER_UPDATED — no action; Supabase
+      // refreshes tokens silently and INITIAL_SESSION is already handled by
+      // the bootstrap above.
     });
 
     // Auto-retry 1: when the device comes back online, flush queued writes.
@@ -66,6 +104,7 @@ function App() {
       window.removeEventListener('online', handleOnline);
       if (retryInterval) clearInterval(retryInterval);
       unsubscribe();
+      authSub.subscription.unsubscribe();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
