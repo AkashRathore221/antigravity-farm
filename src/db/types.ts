@@ -168,7 +168,9 @@ export interface AppSettings {
 export interface SyncQueueItem {
   id: string;
   action: 'insert' | 'update' | 'delete';
-  table: 'crops' | 'inventory' | 'usage_logs' | 'harvests' | 'expenses' | 'weather_logs' | 'settings';
+  // Settings are intentionally NOT in this union — they're local-only,
+  // see updateSettings() in src/store/useAppStore.ts.
+  table: 'crops' | 'inventory' | 'usage_logs' | 'harvests' | 'expenses' | 'weather_logs';
   data: any;
   timestamp: string;
 }

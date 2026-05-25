@@ -657,10 +657,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // ── Settings ─────────────────────────────────────────────────────────────────
   updateSettings: (updates) => {
-    const { settings, syncQueue } = get();
+    // Settings are intentionally local-only (no Supabase `settings` table).
+    // farmProfile / widgetOrder / module toggles persist via localStorage and
+    // are NOT queued for sync — that means they don't roam across devices, but
+    // it avoids polluting syncQueue with entries that pushAllLocalToSupabase
+    // has no table to write to.
+    const { settings } = get();
     const finalSettings = { ...settings, ...updates };
-    const newQueue = addToQueue(syncQueue, 'update', 'settings', finalSettings);
-    set({ settings: finalSettings, syncQueue: newQueue });
+    set({ settings: finalSettings });
     saveLocal(get());
   },
 
