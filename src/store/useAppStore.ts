@@ -81,6 +81,7 @@ interface AppState {
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 const LS_KEY = 'polyhouse_farm_management_state';
+const USER_ID_KEY = 'antigravity_user_id';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 function newId(prefix = 'id') {
@@ -192,7 +193,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ authLoading: true });
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
-      set({ authUser: { id: session.user.id, email: session.user.email ?? '' }, authLoading: false });
+      const newUserId = session.user.id;
+      const storedUserId = localStorage.getItem(USER_ID_KEY);
+      // If a different user previously used this device, wipe their local data
+      // before this user's session resumes — prevents cross-account data leak.
+      if (storedUserId && storedUserId !== newUserId) {
+        localStorage.removeItem(LS_KEY);
+        set({
+          crops: [], inventory: [], usageLogs: [], harvests: [],
+          expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [],
+        });
+      }
+      localStorage.setItem(USER_ID_KEY, newUserId);
+      set({ authUser: { id: newUserId, email: session.user.email ?? '' }, authLoading: false });
     } else {
       set({ authUser: null, authLoading: false });
     }
@@ -202,11 +215,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return error.message;
     if (data.user) {
-      set({ authUser: { id: data.user.id, email: data.user.email ?? '' } });
-      // Re-hydrate from localStorage before pulling from Supabase so that
-      // any records that didn't reach Supabase (bgUpsert failures before logout)
-      // are visible to the recovery-push path inside pullFromSupabase.
-      get().initializeStore();
+      const newUserId = data.user.id;
+      const storedUserId = localStorage.getItem(USER_ID_KEY);
+
+      if (storedUserId && storedUserId !== newUserId) {
+        // Different user signing in on this device — wipe prior user's local
+        // data and queue so no records leak across accounts. Supabase becomes
+        // the sole source for the new user's data via pullFromSupabase below.
+        localStorage.removeItem(LS_KEY);
+        set({
+          crops: [], inventory: [], usageLogs: [], harvests: [],
+          expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [],
+        });
+      } else {
+        // Same user (or first-ever login) — re-hydrate from localStorage so
+        // any records that didn't reach Supabase before the last logout are
+        // visible to the recovery-push branch inside pullFromSupabase.
+        get().initializeStore();
+      }
+
+      localStorage.setItem(USER_ID_KEY, newUserId);
+      set({ authUser: { id: newUserId, email: data.user.email ?? '' } });
       await get().pullFromSupabase();
     }
     return null;
@@ -218,11 +247,28 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   signOut: async () => {
+    const { syncQueue, authUser } = get();
+    // 1. Push any pending changes BEFORE clearing local data — otherwise unsynced
+    //    records would be lost when localStorage is cleared. Best-effort: a failed
+    //    push is logged but does not block sign-out (user-initiated action).
+    if (authUser && syncQueue.length > 0) {
+      try {
+        await pushAllLocalToSupabase(get());
+      } catch (e) {
+        console.error('[Sync] Final push on signOut failed — unsynced records will be lost:', e);
+      }
+    }
+    // 2. End the Supabase session.
     await supabase.auth.signOut();
-    // Clear in-memory Zustand state only — do NOT delete localStorage.
-    // Preserving localStorage means re-authentication can recover any records
-    // that never reached Supabase (bgUpsert failures / offline writes).
-    set({ authUser: null, crops: [], inventory: [], usageLogs: [], harvests: [], expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [] });
+    // 3. Wipe localStorage (data + user marker) so the next user on this device
+    //    starts clean, AND clear in-memory Zustand state.
+    localStorage.removeItem(LS_KEY);
+    localStorage.removeItem(USER_ID_KEY);
+    set({
+      authUser: null,
+      crops: [], inventory: [], usageLogs: [], harvests: [],
+      expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [],
+    });
   },
 
   pullFromSupabase: async () => {
