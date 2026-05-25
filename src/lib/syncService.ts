@@ -7,13 +7,26 @@ type AnyRecord = Record<string, unknown>;
 // present on the local object but missing from this list is stripped before
 // the upsert so it can't trigger a 400 ("column does not exist"). When you add
 // a column to a Supabase table via migration, add it here too.
+// NOTE: these allowlists are conservative — fields that exist on the TS
+// interface but are NOT in the current Supabase schema are intentionally
+// excluded so payloads don't trigger PGRST204 ("column does not exist"):
+//   crops.seed_nursery_cost  — confirmed missing from schema (PGRST204 in logs)
+//   crops.target_yield_kg    — added in same batch as seed_nursery_cost, assumed missing
+//   weather_logs.temp_min    — added in same batch, assumed missing
+//   weather_logs.temp_max    — ditto
+// These fields still work locally (saved to localStorage) but won't roam
+// across devices. Add them back to the allowlist after running a migration:
+//   ALTER TABLE crops        ADD COLUMN seed_nursery_cost numeric DEFAULT 0;
+//   ALTER TABLE crops        ADD COLUMN target_yield_kg   numeric;
+//   ALTER TABLE weather_logs ADD COLUMN temp_min          numeric;
+//   ALTER TABLE weather_logs ADD COLUMN temp_max          numeric;
 const TABLE_COLUMNS: Record<string, ReadonlyArray<string>> = {
-  crops:        ['id', 'user_id', 'name', 'variety', 'seed_company', 'start_date', 'transplant_date', 'expected_end_date', 'end_date', 'area_covered', 'num_plants', 'seed_nursery_cost', 'target_yield_kg', 'notes', 'status', 'created_at'],
+  crops:        ['id', 'user_id', 'name', 'variety', 'seed_company', 'start_date', 'transplant_date', 'expected_end_date', 'end_date', 'area_covered', 'num_plants', 'notes', 'status', 'created_at'],
   inventory:    ['id', 'user_id', 'name', 'brand', 'category', 'unit', 'purchased_qty', 'remaining_qty', 'price', 'purchase_date', 'supplier', 'low_stock_threshold', 'notes', 'image_url', 'created_at'],
   usage_logs:   ['id', 'user_id', 'crop_id', 'date', 'inventory_id', 'product_name', 'quantity_used', 'unit', 'area_treated', 'cost', 'type', 'notes', 'repeat_schedule', 'repeat_interval_days', 'created_at'],
   harvests:     ['id', 'user_id', 'crop_id', 'date', 'weight_total', 'weight_grade_a', 'weight_grade_b', 'weight_grade_c', 'wastage', 'buyer_name', 'mandi_rate', 'sale_rate', 'revenue', 'notes', 'image_url', 'created_at'],
   expenses:     ['id', 'user_id', 'crop_id', 'date', 'category', 'amount', 'notes', 'created_at'],
-  weather_logs: ['id', 'user_id', 'date', 'temp', 'humidity', 'rainfall', 'wind', 'aqi', 'uv_index', 'sunrise', 'sunset', 'vpd', 'dew_point', 'temp_min', 'temp_max', 'created_at'],
+  weather_logs: ['id', 'user_id', 'date', 'temp', 'humidity', 'rainfall', 'wind', 'aqi', 'uv_index', 'sunrise', 'sunset', 'vpd', 'dew_point', 'created_at'],
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
