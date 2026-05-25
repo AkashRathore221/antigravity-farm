@@ -27,6 +27,46 @@ function App() {
       const { authUser: user } = useAppStore.getState();
       if (user) pullFromSupabase();
     });
+
+    // Auto-retry 1: when the device comes back online, flush queued writes.
+    const handleOnline = () => {
+      const { authUser: user, syncQueue } = useAppStore.getState();
+      if (user && syncQueue.length > 0) {
+        void useAppStore.getState().pullFromSupabase();
+      }
+    };
+    window.addEventListener('online', handleOnline);
+
+    // Auto-retry 2: while syncQueue has items, retry every 30s. Clear the
+    // interval as soon as the queue drains. A store subscription re-arms the
+    // interval whenever new pending work appears.
+    let retryInterval: ReturnType<typeof setInterval> | null = null;
+    const tick = () => {
+      const { syncQueue: queue, authUser: user } = useAppStore.getState();
+      if (queue.length === 0) {
+        if (retryInterval) {
+          clearInterval(retryInterval);
+          retryInterval = null;
+        }
+        return;
+      }
+      if (user && navigator.onLine) {
+        void useAppStore.getState().pullFromSupabase();
+      }
+    };
+    const ensureInterval = () => {
+      if (retryInterval) return;
+      if (useAppStore.getState().syncQueue.length === 0) return;
+      retryInterval = setInterval(tick, 30 * 1000);
+    };
+    const unsubscribe = useAppStore.subscribe(() => { ensureInterval(); });
+    ensureInterval();
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      if (retryInterval) clearInterval(retryInterval);
+      unsubscribe();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -248,22 +248,30 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   signOut: async () => {
     const { syncQueue, authUser } = get();
-    // 1. Push any pending changes BEFORE clearing local data — otherwise unsynced
-    //    records would be lost when localStorage is cleared. Best-effort: a failed
-    //    push is logged but does not block sign-out (user-initiated action).
+    // 1. Push any pending changes BEFORE clearing local data. Capture whether
+    //    the push fully succeeded so we can decide if it's safe to wipe LS.
+    let pushOk = true;
     if (authUser && syncQueue.length > 0) {
       try {
-        await pushAllLocalToSupabase(get());
+        pushOk = await pushAllLocalToSupabase(get());
       } catch (e) {
-        console.error('[Sync] Final push on signOut failed — unsynced records will be lost:', e);
+        console.error('[Sync] Final push on signOut threw:', e);
+        pushOk = false;
       }
     }
-    // 2. End the Supabase session.
+    // 2. End the Supabase session regardless — sign-out is user-initiated.
     await supabase.auth.signOut();
-    // 3. Wipe localStorage (data + user marker) so the next user on this device
-    //    starts clean, AND clear in-memory Zustand state.
-    localStorage.removeItem(LS_KEY);
-    localStorage.removeItem(USER_ID_KEY);
+    // 3. Conditionally wipe localStorage. If the push failed, preserve LS so
+    //    the same user can recover their unsynced data on next login (the
+    //    USER_ID_KEY mismatch check still prevents cross-user leak — if a
+    //    different user signs in, signIn/checkSession will wipe LS then).
+    if (pushOk) {
+      localStorage.removeItem(LS_KEY);
+      localStorage.removeItem(USER_ID_KEY);
+    } else {
+      alert('Some data could not be synced. Please reconnect and try again.');
+    }
+    // 4. Always clear in-memory Zustand state so the Auth screen renders.
     set({
       authUser: null,
       crops: [], inventory: [], usageLogs: [], harvests: [],
@@ -304,19 +312,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         // If push failed: leave syncQueue intact so the next refresh retries automatically.
       } else if (cloudTotal > 0) {
-        // Supabase has records and local has nothing pending (or local is empty after logout).
-        // Use Supabase as canonical source.
-        const activeCropId = data.crops.find(c => c.status === 'active')?.id ?? null;
-        set({
-          crops: data.crops,
-          inventory: data.inventory,
-          usageLogs: data.usageLogs,
-          harvests: data.harvests,
-          expenses: data.expenses,
-          weatherLogs: data.weatherLogs,
-          activeCropId,
-          syncQueue: [],
-        });
+        // Supabase has records and local has nothing pending. Per-table merge:
+        // ONLY overwrite a table when cloud has rows for it. For tables where
+        // cloud returned 0 rows, keep the existing local data — this prevents
+        // a partial Supabase sync (e.g. inventory synced but harvests didn't)
+        // from wiping the local copy of the missing tables.
+        const merged = {
+          crops:       data.crops.length        > 0 ? data.crops        : localState.crops,
+          inventory:   data.inventory.length    > 0 ? data.inventory    : localState.inventory,
+          usageLogs:   data.usageLogs.length    > 0 ? data.usageLogs    : localState.usageLogs,
+          harvests:    data.harvests.length     > 0 ? data.harvests     : localState.harvests,
+          expenses:    data.expenses.length     > 0 ? data.expenses     : localState.expenses,
+          weatherLogs: data.weatherLogs.length  > 0 ? data.weatherLogs  : localState.weatherLogs,
+        };
+        const activeCropId = merged.crops.find(c => c.status === 'active')?.id ?? null;
+        set({ ...merged, activeCropId, syncQueue: [] });
         saveLocal(get());
       }
       // Both empty: new user or mock-only state — leave local untouched.
