@@ -203,6 +203,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (error) return error.message;
     if (data.user) {
       set({ authUser: { id: data.user.id, email: data.user.email ?? '' } });
+      // Re-hydrate from localStorage before pulling from Supabase so that
+      // any records that didn't reach Supabase (bgUpsert failures before logout)
+      // are visible to the recovery-push path inside pullFromSupabase.
+      get().initializeStore();
       await get().pullFromSupabase();
     }
     return null;
@@ -215,8 +219,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   signOut: async () => {
     await supabase.auth.signOut();
+    // Clear in-memory Zustand state only — do NOT delete localStorage.
+    // Preserving localStorage means re-authentication can recover any records
+    // that never reached Supabase (bgUpsert failures / offline writes).
     set({ authUser: null, crops: [], inventory: [], usageLogs: [], harvests: [], expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [] });
-    localStorage.removeItem(LS_KEY);
   },
 
   pullFromSupabase: async () => {
