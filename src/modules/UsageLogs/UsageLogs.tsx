@@ -28,7 +28,7 @@ export const UsageLogs: React.FC = () => {
     if (showAddForm && activeCrop?.area_covered) {
       setFormData(prev => ({ ...prev, area_treated: String(activeCrop.area_covered) }));
     }
-  }, [showAddForm, activeCrop?.area_covered]);
+  }, [showAddForm, activeCrop?.id, activeCrop?.area_covered]);
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();

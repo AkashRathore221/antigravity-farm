@@ -554,7 +554,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
                 </div>
                 <div className="bg-slate-100/40 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-200/20">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight block">VPD Index</span>
-                  <span className="text-lg font-extrabold text-slate-700 dark:text-slate-200">{latestWeather.vpd} kPa</span>
+                  <span className="text-lg font-extrabold text-slate-700 dark:text-slate-200">{latestWeather.vpd != null ? `${latestWeather.vpd} kPa` : '—'}</span>
                 </div>
                 <div className="bg-slate-100/40 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-200/20">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight block">AQI / UV</span>
@@ -582,7 +582,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
         );
 
       // 7. RECENT OPERATIONS TIMELINE
-      case 'activityFeed':
+      case 'activityFeed': {
         const recentLogs = [
           ...harvests.map(h => ({ type: 'harvest' as const, date: h.date, desc: `Harvested ${h.weight_total}kg Grade A/B cucumber. Revenue ₹${h.revenue.toFixed(0)}` })),
           ...usageLogs.map(u => ({ type: 'usage' as const, date: u.date, desc: `Applied ${u.quantity_used}${u.unit} of ${u.product_name} (${u.type})` }))
@@ -617,6 +617,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
             )}
           </div>
         );
+      }
 
       default:
         return null;

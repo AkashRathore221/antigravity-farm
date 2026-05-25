@@ -86,6 +86,19 @@ export const CropLifecycle: React.FC = () => {
       notes: formData.notes
     });
     setIsSubmitConfirm(false);
+    setFormData({
+      name: 'Cucumber Summer Batch ' + new Date().getFullYear(),
+      variety: 'Multistar F1',
+      seed_company: 'Rijk Zwaan',
+      start_date: new Date().toISOString().split('T')[0],
+      transplant_date: new Date().toISOString().split('T')[0],
+      expected_end_date: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      area_covered: 1000,
+      num_plants: 3200,
+      seed_nursery_cost: 0,
+      target_yield_kg: 0,
+      notes: ''
+    });
   };
 
   // Filter archived crops
@@ -231,6 +244,7 @@ export const CropLifecycle: React.FC = () => {
                     <input
                       type="date"
                       required
+                      min={formData.start_date}
                       value={formData.transplant_date}
                       onChange={(e) => setFormData({ ...formData, transplant_date: e.target.value })}
                       className="w-full bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/40 dark:border-slate-800/40 rounded-xl px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
@@ -241,6 +255,7 @@ export const CropLifecycle: React.FC = () => {
                     <input
                       type="date"
                       required
+                      min={formData.transplant_date}
                       value={formData.expected_end_date}
                       onChange={(e) => setFormData({ ...formData, expected_end_date: e.target.value })}
                       className="w-full bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/40 dark:border-slate-800/40 rounded-xl px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"

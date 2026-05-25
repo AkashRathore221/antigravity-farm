@@ -576,7 +576,7 @@ export const Weather: React.FC = () => {
                       <td className="py-3">{log.temp}°C</td>
                       <td className="py-3">{log.humidity}%</td>
                       <td className="py-3 font-extrabold font-heading text-slate-850 dark:text-slate-100">
-                        {log.vpd} kPa
+                        {log.vpd != null ? `${log.vpd} kPa` : '—'}
                       </td>
                       <td className="py-3">{log.dew_point}°C</td>
                       <td className="py-3">{log.wind} km/h</td>

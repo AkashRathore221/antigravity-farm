@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { supabase } from '../../lib/supabase';
 import {
@@ -47,6 +47,11 @@ export const Settings: React.FC = () => {
   // Active crop params form state
   const [cropArea, setCropArea] = useState(String(activeCrop?.area_covered ?? ''));
   const [cropPlants, setCropPlants] = useState(String(activeCrop?.num_plants ?? ''));
+
+  useEffect(() => {
+    setCropArea(String(activeCrop?.area_covered ?? ''));
+    setCropPlants(String(activeCrop?.num_plants ?? ''));
+  }, [activeCropId]);
 
   const handleResetPassword = async () => {
     if (!authUser?.email) return;

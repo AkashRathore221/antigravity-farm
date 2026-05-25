@@ -393,6 +393,7 @@ export const Expenses: React.FC = () => {
                               className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-lg px-2 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                             >
                               <option value="labour">Labour</option>
+                              <option value="inventory">Inventory Purchase</option>
                               <option value="transport">Transport</option>
                               <option value="packaging">Packaging</option>
                               <option value="personal_vehicle_fuel">Fuel</option>

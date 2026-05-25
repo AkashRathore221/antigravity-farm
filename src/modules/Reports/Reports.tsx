@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import {
   FileSpreadsheet, FileText, Download, Upload, Printer, Sprout
@@ -10,10 +10,15 @@ export const Reports: React.FC = () => {
     settings, importBackup 
   } = useAppStore();
 
-  const [selectedCropId, setSelectedCropId] = useState<string>(() => {
+  const [selectedCropId, setSelectedCropId] = useState<string>('');
+
+  // Keep selectedCropId valid as crops load (store hydrates after mount).
+  useEffect(() => {
+    if (selectedCropId && crops.some(c => c.id === selectedCropId)) return;
     const active = crops.find(c => c.status === 'active');
-    return active ? active.id : (crops[0]?.id || '');
-  });
+    const fallback = active?.id ?? crops[0]?.id ?? '';
+    setSelectedCropId(fallback);
+  }, [crops, selectedCropId]);
 
   const [importText, setImportText] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -102,7 +107,7 @@ export const Reports: React.FC = () => {
   };
 
   const exportInventory = () => {
-    const headers = ['ID', 'Name', 'Brand', 'Category', 'Unit', 'Purchased Qty', 'Remaining Qty', 'Price Per Unit', 'Purchase Date', 'Supplier', 'Low Stock Threshold', 'Notes'];
+    const headers = ['ID', 'Name', 'Brand', 'Category', 'Unit', 'Purchased Qty', 'Remaining Qty', 'Total Purchase Price', 'Purchase Date', 'Supplier', 'Low Stock Threshold', 'Notes'];
     const rows = inventory.map(i => [
       i.id, i.name, i.brand, i.category, i.unit, i.purchased_qty, i.remaining_qty, i.price, i.purchase_date, i.supplier, i.low_stock_threshold, i.notes
     ]);

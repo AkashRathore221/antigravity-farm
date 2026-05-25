@@ -95,7 +95,22 @@ function addToQueue(
   table: SyncQueueItem['table'],
   data: unknown
 ): SyncQueueItem[] {
-  return [...queue, { id: newId(), action, table, data, timestamp: new Date().toISOString() }];
+  const newEntry: SyncQueueItem = { id: newId(), action, table, data, timestamp: new Date().toISOString() };
+  const recordId = data && typeof data === 'object' && 'id' in (data as object)
+    ? (data as { id: string }).id
+    : null;
+  // Deduplicate: remove any earlier pending entry for the same (table, recordId)
+  // so only the latest operation per record is kept.
+  const deduped = recordId
+    ? queue.filter(item => {
+        const itemId = item.data && typeof item.data === 'object' && 'id' in (item.data as object)
+          ? (item.data as { id: string }).id : null;
+        return !(item.table === table && itemId === recordId);
+      })
+    : queue;
+  const result = [...deduped, newEntry];
+  // Cap at 500 to prevent localStorage overflow on prolonged offline use.
+  return result.length > 500 ? result.slice(-500) : result;
 }
 
 function saveLocal(state: Partial<AppState>) {
@@ -323,12 +338,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Crops ─────────────────────────────────────────────────────────────────────
   startCrop: (cropData) => {
     const { crops, syncQueue, authUser } = get();
+    const today = new Date().toISOString().split('T')[0];
+    const previouslyActive = crops.find(c => c.status === 'active');
     const updatedCrops = crops.map(c =>
-      c.status === 'active' ? { ...c, status: 'archived' as const, end_date: new Date().toISOString().split('T')[0] } : c
+      c.status === 'active' ? { ...c, status: 'archived' as const, end_date: today } : c
     );
     const newCrop: Crop = { ...cropData, id: newId('crop'), tenant_id: 'tenant-1', status: 'active', created_at: new Date().toISOString() };
     const finalCrops = [newCrop, ...updatedCrops];
-    const newQueue = addToQueue(syncQueue, 'insert', 'crops', newCrop);
+    let newQueue = addToQueue(syncQueue, 'insert', 'crops', newCrop);
+    // Also sync the crop that just got archived so Supabase status is updated.
+    if (previouslyActive) {
+      const archivedCrop = { ...previouslyActive, status: 'archived' as const, end_date: today };
+      newQueue = addToQueue(newQueue, 'update', 'crops', archivedCrop);
+      bgUpsert('crops', archivedCrop, authUser?.id);
+    }
     set({ crops: finalCrops, activeCropId: newCrop.id, syncQueue: newQueue });
     saveLocal(get());
     bgUpsert('crops', newCrop, authUser?.id);
@@ -382,7 +405,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateInventory: (id, updates) => {
     const { inventory, syncQueue, authUser } = get();
-    const updated = inventory.map(i => i.id === id ? { ...i, ...updates } : i);
+    const existing = inventory.find(i => i.id === id);
+    let finalUpdates = { ...updates };
+    // When purchased_qty changes and remaining_qty is not explicitly provided,
+    // shift remaining_qty by the same delta so relative stock level is preserved.
+    if (existing && updates.purchased_qty !== undefined && updates.purchased_qty !== existing.purchased_qty && updates.remaining_qty === undefined) {
+      const delta = updates.purchased_qty - existing.purchased_qty;
+      finalUpdates.remaining_qty = parseFloat(Math.max(0, existing.remaining_qty + delta).toFixed(2));
+    }
+    const updated = inventory.map(i => i.id === id ? { ...i, ...finalUpdates } : i);
     const updatedItem = updated.find(i => i.id === id);
     const newQueue = addToQueue(syncQueue, 'update', 'inventory', updatedItem);
     set({ inventory: updated, syncQueue: newQueue });
@@ -407,16 +438,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (logData.inventory_id) {
       const invItem = inventory.find(i => i.id === logData.inventory_id);
-      if (invItem) {
-        const perUnitCost = invItem.purchased_qty > 0 ? invItem.price / invItem.purchased_qty : 0;
-        calculatedCost = parseFloat((logData.quantity_used * perUnitCost).toFixed(2));
-        inventoryItemName = `${invItem.name} (${invItem.brand})`;
-        updatedInventory = inventory.map(i =>
-          i.id === logData.inventory_id
-            ? { ...i, remaining_qty: Math.max(0, parseFloat((i.remaining_qty - logData.quantity_used).toFixed(2))) }
-            : i
-        );
+      if (!invItem) {
+        alert(`Linked inventory item not found. It may have been deleted. Please re-select a product.`);
+        return;
       }
+      const perUnitCost = invItem.purchased_qty > 0 ? invItem.price / invItem.purchased_qty : 0;
+      calculatedCost = parseFloat((logData.quantity_used * perUnitCost).toFixed(2));
+      inventoryItemName = `${invItem.name} (${invItem.brand})`;
+      updatedInventory = inventory.map(i =>
+        i.id === logData.inventory_id
+          ? { ...i, remaining_qty: Math.max(0, parseFloat((i.remaining_qty - logData.quantity_used).toFixed(2))) }
+          : i
+      );
     }
 
     const newLog: UsageLog = { ...logData, id: newId('use'), tenant_id: 'tenant-1', cost: calculatedCost, product_name: inventoryItemName, created_at: new Date().toISOString() };
@@ -529,9 +562,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   deleteWeatherLog: (id) => {
-    const { weatherLogs, authUser } = get();
+    const { weatherLogs, syncQueue, authUser } = get();
     const updated = weatherLogs.filter(l => l.id !== id);
-    set({ weatherLogs: updated });
+    const newQueue = addToQueue(syncQueue, 'delete', 'weather_logs', { id });
+    set({ weatherLogs: updated, syncQueue: newQueue });
     saveLocal(get());
     bgDelete('weather_logs', id, authUser?.id);
   },

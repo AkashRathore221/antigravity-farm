@@ -38,84 +38,40 @@ export const Analytics: React.FC = () => {
     { name: 'Wastage (Pest/Rot)', value: totalWastage, color: '#f43f5e' }
   ].filter(d => d.value > 0);
 
+  // Pure helper — no Date mutation, handles month-boundary correctly.
+  const getWeekStart = (dateStr: string): string => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    const dayOfWeek = date.getDay(); // 0=Sun
+    return new Date(y, m - 1, d - dayOfWeek).toISOString().split('T')[0];
+  };
+
+  const getGroupKey = (dateStr: string): string => {
+    if (timeFilter === 'weekly') return getWeekStart(dateStr);
+    if (timeFilter === 'monthly') return dateStr.substring(0, 7);
+    return dateStr;
+  };
+
   // 3. Dynamic Grouping by Date for Trends
   const groupData = () => {
-    // Map dates to metrics
     const dataMap: Record<string, { date: string; yield: number; revenue: number; expense: number }> = {};
-    
-    // Group Harvests
-    cropHarvests.forEach(h => {
-      let key = h.date;
-      if (timeFilter === 'weekly') {
-        // Group by ISO Week or simplified week start
-        const d = new Date(h.date);
-        const firstDay = d.getDate() - d.getDay();
-        const weekDate = new Date(d.setDate(firstDay));
-        key = weekDate.toISOString().split('T')[0];
-      } else if (timeFilter === 'monthly') {
-        key = h.date.substring(0, 7); // YYYY-MM
-      }
 
-      if (!dataMap[key]) {
-        dataMap[key] = { date: key, yield: 0, revenue: 0, expense: 0 };
-      }
-      dataMap[key].yield += Number(h.weight_total);
-      dataMap[key].revenue += Number(h.revenue);
-    });
+    const addToMap = (dateStr: string, yieldVal: number, rev: number, exp: number) => {
+      const key = getGroupKey(dateStr);
+      if (!dataMap[key]) dataMap[key] = { date: key, yield: 0, revenue: 0, expense: 0 };
+      dataMap[key].yield += yieldVal;
+      dataMap[key].revenue += rev;
+      dataMap[key].expense += exp;
+    };
 
-    // Group General Expenses
-    cropExpenses.forEach(e => {
-      let key = e.date;
-      if (timeFilter === 'weekly') {
-        const d = new Date(e.date);
-        const firstDay = d.getDate() - d.getDay();
-        const weekDate = new Date(d.setDate(firstDay));
-        key = weekDate.toISOString().split('T')[0];
-      } else if (timeFilter === 'monthly') {
-        key = e.date.substring(0, 7);
-      }
-
-      if (!dataMap[key]) {
-        dataMap[key] = { date: key, yield: 0, revenue: 0, expense: 0 };
-      }
-      dataMap[key].expense += Number(e.amount);
-    });
-
-    // Group Inventory Usages (Chemical/Fertilizer costs)
-    cropUsages.forEach(u => {
-      let key = u.date;
-      if (timeFilter === 'weekly') {
-        const d = new Date(u.date);
-        const firstDay = d.getDate() - d.getDay();
-        const weekDate = new Date(d.setDate(firstDay));
-        key = weekDate.toISOString().split('T')[0];
-      } else if (timeFilter === 'monthly') {
-        key = u.date.substring(0, 7);
-      }
-
-      if (!dataMap[key]) {
-        dataMap[key] = { date: key, yield: 0, revenue: 0, expense: 0 };
-      }
-      dataMap[key].expense += Number(u.cost);
-    });
-
-    // Add seed/nursery upfront cost on crop start date
+    cropHarvests.forEach(h => addToMap(h.date, Number(h.weight_total), Number(h.revenue), 0));
+    cropExpenses.forEach(e => addToMap(e.date, 0, 0, Number(e.amount)));
+    cropUsages.forEach(u => addToMap(u.date, 0, 0, Number(u.cost)));
     if (activeCrop && (activeCrop.seed_nursery_cost ?? 0) > 0) {
-      let seedKey = activeCrop.start_date;
-      if (timeFilter === 'weekly') {
-        const d = new Date(activeCrop.start_date);
-        const firstDay = d.getDate() - d.getDay();
-        const weekDate = new Date(d.setDate(firstDay));
-        seedKey = weekDate.toISOString().split('T')[0];
-      } else if (timeFilter === 'monthly') {
-        seedKey = activeCrop.start_date.substring(0, 7);
-      }
-      if (!dataMap[seedKey]) dataMap[seedKey] = { date: seedKey, yield: 0, revenue: 0, expense: 0 };
-      dataMap[seedKey].expense += activeCrop.seed_nursery_cost ?? 0;
+      addToMap(activeCrop.start_date, 0, 0, activeCrop.seed_nursery_cost ?? 0);
     }
 
-    // Sort chronologically
-    return Object.values(dataMap).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    return Object.values(dataMap).sort((a, b) => a.date.localeCompare(b.date));
   };
 
   const trendData = groupData();
@@ -181,8 +137,8 @@ export const Analytics: React.FC = () => {
           <p className="text-slate-400 font-bold">{label}</p>
           {payload.map((item: any, index: number) => (
             <p key={index} style={{ color: item.color || item.fill }}>
-              {item.name}: {item.value.toLocaleString(undefined, { maximumFractionDigits: 2 })} 
-              {item.name.includes('Yield') ? ' kg' : ' $'}
+              {item.name}: {(item.value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              {item.name.includes('Yield') ? ' kg' : ' ₹'}
             </p>
           ))}
         </div>
