@@ -132,16 +132,19 @@ function saveLocal(state: Partial<AppState>) {
 // Fire-and-forget Supabase upsert — never blocks the UI.
 // userId guard is a fast-fail using the store's cached auth state;
 // upsertRow re-verifies via supabase.auth.getUser() before writing.
+// upsertRow / deleteRow log structured Supabase errors (message/code/details/
+// hint/payload) themselves; the catches here just tag the failure source so a
+// reader can tell async background writes apart from foreground recovery pushes.
 function bgUpsert(table: string, obj: unknown, userId: string | undefined) {
   if (!userId) return;
-  void upsertRow(table, obj as Record<string, unknown>).catch((e) => {
-    console.error(`[Sync] bgUpsert failed for ${table}:`, e);
+  void upsertRow(table, obj as Record<string, unknown>).catch((e: { message?: string }) => {
+    console.error(`[Sync] bgUpsert(${table}) rejected:`, e?.message ?? e);
   });
 }
 function bgDelete(table: string, id: string, userId: string | undefined) {
   if (!userId) return;
-  void deleteRow(table, id).catch((e) => {
-    console.error(`[Sync] bgDelete failed for ${table}:`, e);
+  void deleteRow(table, id).catch((e: { message?: string }) => {
+    console.error(`[Sync] bgDelete(${table}, ${id}) rejected:`, e?.message ?? e);
   });
 }
 
