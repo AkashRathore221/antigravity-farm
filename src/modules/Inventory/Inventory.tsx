@@ -431,7 +431,7 @@ export const Inventory: React.FC = () => {
                     <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
                       <div 
                         className={`h-full rounded-full transition-all duration-300 ${isLowStock ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                        style={{ width: `${Math.min(100, (item.remaining_qty / item.purchased_qty) * 100)}%` }}
+                        style={{ width: `${Math.min(100, item.purchased_qty > 0 ? (item.remaining_qty / item.purchased_qty) * 100 : 0)}%` }}
                       ></div>
                     </div>
                     

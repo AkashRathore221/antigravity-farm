@@ -33,11 +33,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
   let costPerKg = 0;
   let costPerPlant = 0;
   if (activeCrop) {
-    // Days since transplant
+    // Days since transplant — guard against empty / invalid transplant_date,
+    // which would otherwise make `new Date(...).getTime()` return NaN and
+    // render "NaN days".
     const tDate = new Date(activeCrop.transplant_date);
-    const today = new Date();
-    const diffTime = Math.abs(today.getTime() - tDate.getTime());
-    daysSinceTransplant = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    if (!isNaN(tDate.getTime())) {
+      const today = new Date();
+      const diffTime = Math.abs(today.getTime() - tDate.getTime());
+      daysSinceTransplant = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    }
 
     // Active harvests
     const cropHarvests = harvests.filter(h => h.crop_id === activeCrop.id);

@@ -39,7 +39,7 @@ export interface InventoryItem {
   unit: UnitType;
   purchased_qty: number;
   remaining_qty: number;
-  price: number; // price per unit
+  price: number; // total purchase price for the whole `purchased_qty` (per-unit cost = price / purchased_qty)
   purchase_date: string;
   supplier: string;
   low_stock_threshold: number;
