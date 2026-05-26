@@ -5,13 +5,13 @@ import {
   Layout, Sliders, Database, Trash2,
   ToggleLeft, ToggleRight, ArrowUp, ArrowDown, ShieldAlert,
   RefreshCw, AlertCircle, User, LogOut, CheckCircle2, WifiOff, KeyRound,
-  MapPin, Leaf
+  MapPin, Leaf, UploadCloud, XCircle
 } from 'lucide-react';
 
 export const Settings: React.FC = () => {
   const {
     settings, updateSettings, toggleModule, toggleFeature,
-    updateWidgetOrder, resetAllData, authUser, signOut, pullFromSupabase, isSyncing, isOnline,
+    updateWidgetOrder, resetAllData, authUser, signOut, pullFromSupabase, forceSync, isSyncing, isOnline,
     crops, activeCropId, updateActiveCropParams
   } = useAppStore();
 
@@ -19,6 +19,7 @@ export const Settings: React.FC = () => {
 
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [forceSyncStatus, setForceSyncStatus] = useState<'idle' | 'syncing' | 'done' | 'failed'>('idle');
   const [resetPwLoading, setResetPwLoading] = useState(false);
   const [resetPwMsg, setResetPwMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -412,8 +413,40 @@ export const Settings: React.FC = () => {
                 disabled={isSyncing || !authUser || !isOnline}
                 className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-md transition-all"
               >
-                <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
-                <span>{isSyncing ? 'Syncing…' : 'Pull Latest From Cloud'}</span>
+                <RefreshCw size={12} className={isSyncing && forceSyncStatus !== 'syncing' ? 'animate-spin' : ''} />
+                <span>{isSyncing && forceSyncStatus !== 'syncing' ? 'Syncing…' : 'Pull Latest From Cloud'}</span>
+              </button>
+
+              {/* Force Sync */}
+              {forceSyncStatus === 'done' && (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-500/10 p-2 rounded-lg">
+                  <CheckCircle2 size={13} />
+                  <span>Sync complete — all local data pushed to cloud.</span>
+                </div>
+              )}
+              {forceSyncStatus === 'failed' && (
+                <div className="flex items-center gap-1.5 text-xs text-red-500 font-semibold bg-red-500/10 p-2 rounded-lg">
+                  <XCircle size={13} />
+                  <span>Sync failed — check your connection and try again.</span>
+                </div>
+              )}
+              <button
+                onClick={async () => {
+                  setForceSyncStatus('syncing');
+                  const ok = await forceSync();
+                  setForceSyncStatus(ok ? 'done' : 'failed');
+                  setTimeout(() => setForceSyncStatus('idle'), 3000);
+                }}
+                disabled={isSyncing || !authUser || !isOnline}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-md transition-all"
+              >
+                <UploadCloud size={12} className={forceSyncStatus === 'syncing' ? 'animate-spin' : ''} />
+                <span>
+                  {forceSyncStatus === 'syncing' ? 'Syncing...' :
+                   forceSyncStatus === 'done' ? 'Sync complete ✓' :
+                   forceSyncStatus === 'failed' ? 'Sync failed ✗' :
+                   'Force Sync Now'}
+                </span>
               </button>
 
               {/* Reset Password */}

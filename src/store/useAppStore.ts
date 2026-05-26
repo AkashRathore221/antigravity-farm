@@ -39,6 +39,7 @@ interface AppState {
   signUp: (email: string, password: string) => Promise<string | null>;
   signOut: () => Promise<void>;
   pullFromSupabase: () => Promise<void>;
+  forceSync: () => Promise<boolean>;
 
   setOnlineStatus: (status: boolean) => void;
   resetAllData: () => void;
@@ -360,6 +361,39 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Both empty: new user or mock-only state — leave local untouched.
     } catch (err) {
       console.error('[Sync] pullFromSupabase threw:', err);
+    } finally {
+      set({ isSyncing: false });
+    }
+  },
+
+  forceSync: async () => {
+    const { crops, inventory, usageLogs, harvests, expenses, weatherLogs, syncQueue, authUser } = get();
+    if (!authUser) return false;
+    const tables: Array<{ table: SyncQueueItem['table']; records: unknown[] }> = [
+      { table: 'crops',        records: crops },
+      { table: 'inventory',    records: inventory },
+      { table: 'usage_logs',   records: usageLogs },
+      { table: 'harvests',     records: harvests },
+      { table: 'expenses',     records: expenses },
+      { table: 'weather_logs', records: weatherLogs },
+    ];
+    let queue = syncQueue;
+    for (const { table, records } of tables) {
+      for (const record of records) {
+        queue = addToQueue(queue, 'update', table, record);
+      }
+    }
+    set({ syncQueue: queue, isSyncing: true });
+    saveLocal(get());
+    try {
+      const ok = await pushAllLocalToSupabase(get());
+      if (ok) {
+        set({ syncQueue: [] });
+        saveLocal(get());
+      }
+      return ok;
+    } catch {
+      return false;
     } finally {
       set({ isSyncing: false });
     }
