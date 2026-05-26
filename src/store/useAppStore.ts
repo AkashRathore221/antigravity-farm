@@ -148,8 +148,10 @@ function bgDelete(table: string, id: string, userId: string | undefined) {
   });
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Recovery path: push all local records to Supabase when bgUpsert previously failed silently.
-// Returns true only if every upsert succeeded — caller should only clear syncQueue on true.
+// Returns true only if every upsert AND delete succeeded — caller should only clear syncQueue on true.
 // Tables are processed in FK dependency order (crops/inventory first, then referencing tables)
 // so expenses/usage_logs never try to insert before their crop_id FK target exists.
 async function pushAllLocalToSupabase(state: Partial<AppState>): Promise<boolean> {
@@ -164,14 +166,29 @@ async function pushAllLocalToSupabase(state: Partial<AppState>): Promise<boolean
   ];
   for (const { name, rows } of orderedTables) {
     await Promise.all(
-      rows.map(row =>
-        upsertRow(name, row as Record<string, unknown>).catch(e => {
+      rows.map(row => {
+        const id = (row as Record<string, unknown>).id;
+        if (typeof id === 'string' && !UUID_RE.test(id)) {
+          console.warn(`[Sync] Skipping recovery upsert for ${name}: non-UUID id "${id}"`);
+          return Promise.resolve();
+        }
+        return upsertRow(name, row as Record<string, unknown>).catch(e => {
           console.error(`[Sync] Recovery upsert failed for ${name}:`, e);
           allOk = false;
-        })
-      )
+        });
+      })
     );
   }
+  // Process offline deletes that were queued but never reached Supabase.
+  const pendingDeletes = (state.syncQueue ?? []).filter(e => e.action === 'delete');
+  await Promise.all(
+    pendingDeletes.map(entry =>
+      deleteRow(entry.table, (entry.data as { id: string }).id).catch(e => {
+        console.error(`[Sync] Recovery delete failed for ${entry.table}:`, e);
+        allOk = false;
+      })
+    )
+  );
   return allOk;
 }
 
@@ -234,6 +251,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Same user (or first-ever login) — re-hydrate from localStorage so
         // any records that didn't reach Supabase before the last logout are
         // visible to the recovery-push branch inside pullFromSupabase.
+        if (!storedUserId) {
+          // First-ever login on this device: clear any mock data seeded into LS
+          // so initializeStore starts with empty arrays, not the demo dataset.
+          localStorage.removeItem(LS_KEY);
+        }
         await get().initializeStore();
       }
 
@@ -417,6 +439,25 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
         set(s);
         saveLocal(s);
+        // Queue every imported record so the recovery-push branch syncs them
+        // to Supabase — without this, the next pullFromSupabase would overwrite
+        // the restored data with whatever is currently in the cloud.
+        const importTables: Array<{ table: SyncQueueItem['table']; records: unknown[] }> = [
+          { table: 'crops',        records: s.crops        },
+          { table: 'inventory',    records: s.inventory     },
+          { table: 'usage_logs',   records: s.usageLogs     },
+          { table: 'harvests',     records: s.harvests      },
+          { table: 'expenses',     records: s.expenses      },
+          { table: 'weather_logs', records: s.weatherLogs   },
+        ];
+        let importQueue = s.syncQueue ?? [];
+        for (const { table, records } of importTables) {
+          for (const record of records) {
+            importQueue = addToQueue(importQueue, 'update', table, record);
+          }
+        }
+        set({ syncQueue: importQueue });
+        saveLocal(get());
         return true;
       }
       return false;
