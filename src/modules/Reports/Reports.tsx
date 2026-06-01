@@ -77,13 +77,23 @@ export const Reports: React.FC = () => {
 
   // Standard CSV Exporter
   const downloadCSV = (headers: string[], rows: any[][], fileName: string) => {
+    // Prevent CSV formula injection: prefix any cell starting with =, +, -,
+    // @, tab, or carriage return with a single quote so Excel / Sheets
+    // treat the content as literal text, not a formula.
+    const sanitize = (val: string) => {
+      if ([`=`, `+`, `-`, `@`, `\t`, `\r`].some(c => val.startsWith(c))) {
+        return `'${val}`;
+      }
+      return val;
+    };
     const csvContent = [
-      headers.join(','),
+      headers.map(h => sanitize(h)).join(','),
       ...rows.map(e => e.map(val => {
         if (typeof val === 'string') {
-          return `"${val.replace(/"/g, '""')}"`;
+          return `"${sanitize(val).replace(/"/g, '""')}"`;
         }
-        return val === null || val === undefined ? '' : String(val);
+        if (val === null || val === undefined) return '';
+        return sanitize(String(val));
       }).join(','))
     ].join('\n');
     

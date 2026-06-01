@@ -97,6 +97,12 @@ function addToQueue(
   table: SyncQueueItem['table'],
   data: unknown
 ): SyncQueueItem[] {
+  // Defense-in-depth: refuse undefined/null or anything lacking a string id
+  // so a buggy caller can't poison the recovery push with garbage entries.
+  if (!data || typeof (data as { id?: unknown }).id !== 'string') {
+    console.warn('[Queue] Rejected entry with missing id:', table, action, data);
+    return queue;
+  }
   const newEntry: SyncQueueItem = { id: newId(), action, table, data, timestamp: new Date().toISOString() };
   const recordId = data && typeof data === 'object' && 'id' in (data as object)
     ? (data as { id: string }).id
@@ -150,6 +156,22 @@ function bgDelete(table: string, id: string, userId: string | undefined) {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Enforce the "at most one active crop" invariant on a crop array.
+// When a corrupted backup or stale hydration produces more than one,
+// keep the most recently created as active and archive the rest with
+// today's date so the UI never has to disambiguate.
+function normalizeActiveCrops(crops: Crop[]): Crop[] {
+  const actives = crops.filter(c => c.status === 'active');
+  if (actives.length <= 1) return crops;
+  const keepId = [...actives].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))[0].id;
+  const today = new Date().toISOString().split('T')[0];
+  return crops.map(c =>
+    c.status === 'active' && c.id !== keepId
+      ? { ...c, status: 'archived' as const, end_date: today }
+      : c
+  );
+}
 
 // Recovery path: push all local records to Supabase when bgUpsert previously failed silently.
 // Returns true only if every upsert AND delete succeeded — caller should only clear syncQueue on true.
@@ -433,9 +455,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         // localStorage has data — load it. Per-user safety is enforced by the
         // USER_ID_KEY mismatch check in signIn / checkSession.
         const parsed = JSON.parse(stored);
-        const active = parsed.crops?.find((c: Crop) => c.status === 'active')?.id ?? null;
+        const normalizedCrops = normalizeActiveCrops(parsed.crops ?? []);
+        const active = normalizedCrops.find(c => c.status === 'active')?.id ?? null;
         set({
-          crops: parsed.crops ?? [],
+          crops: normalizedCrops,
           inventory: parsed.inventory ?? [],
           usageLogs: parsed.usageLogs ?? [],
           harvests: parsed.harvests ?? [],
@@ -499,9 +522,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           );
           if (!proceed) return false;
         }
-        const active = parsed.crops?.find((c: Crop) => c.status === 'active')?.id ?? null;
+        const normalizedCrops = normalizeActiveCrops(parsed.crops ?? []);
+        const active = normalizedCrops.find(c => c.status === 'active')?.id ?? null;
         const s = {
-          crops: parsed.crops ?? [], inventory: parsed.inventory ?? [],
+          crops: normalizedCrops, inventory: parsed.inventory ?? [],
           usageLogs: parsed.usageLogs ?? [], harvests: parsed.harvests ?? [],
           expenses: parsed.expenses ?? [], weatherLogs: parsed.weatherLogs ?? [],
           settings: parsed.settings ?? defaultSettings, syncQueue: parsed.syncQueue ?? [],
@@ -537,6 +561,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Crops ─────────────────────────────────────────────────────────────────────
   startCrop: (cropData) => {
     const { crops, syncQueue, authUser } = get();
+    if (crops.some(c => c.status === 'active')) {
+      alert('You already have an active crop. Please end the current crop before starting a new one.');
+      return;
+    }
     const today = new Date().toISOString().split('T')[0];
     const previouslyActive = crops.find(c => c.status === 'active');
     const updatedCrops = crops.map(c =>
@@ -558,6 +586,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   endCrop: (id) => {
     const { crops, syncQueue, authUser } = get();
+    const target = crops.find(c => c.id === id);
+    if (!target) return;
     const today = new Date().toISOString().split('T')[0];
     const updatedCrops = crops.map(c => c.id === id ? { ...c, status: 'archived' as const, end_date: today } : c);
     const archived = updatedCrops.find(c => c.id === id);
@@ -635,6 +665,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateInventory: (id, updates) => {
     const { inventory, expenses, syncQueue, authUser } = get();
     const existing = inventory.find(i => i.id === id);
+    if (!existing) return;
     let finalUpdates = { ...updates };
     // When purchased_qty changes and remaining_qty is not explicitly provided,
     // shift remaining_qty by the same delta so relative stock level is preserved.
@@ -777,6 +808,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateExpense: (id, updates) => {
     const { expenses, syncQueue, authUser } = get();
+    const target = expenses.find(e => e.id === id);
+    if (!target) return;
     const updated = expenses.map(e => e.id === id ? { ...e, ...updates } : e);
     const updatedItem = updated.find(e => e.id === id);
     const newQueue = addToQueue(syncQueue, 'update', 'expenses', updatedItem);
@@ -856,6 +889,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!Number.isFinite(numPlants) || numPlants <= 0) return;
     const { crops, activeCropId, syncQueue, authUser } = get();
     if (!activeCropId) return;
+    const target = crops.find(c => c.id === activeCropId);
+    if (!target) return;
     const updated = crops.map(c => c.id === activeCropId ? { ...c, area_covered: area, num_plants: numPlants } : c);
     const updatedCrop = updated.find(c => c.id === activeCropId);
     const newQueue = addToQueue(syncQueue, 'update', 'crops', updatedCrop);

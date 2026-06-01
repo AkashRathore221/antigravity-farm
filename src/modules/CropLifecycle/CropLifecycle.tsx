@@ -64,6 +64,17 @@ export const CropLifecycle: React.FC = () => {
 
   const handleStartCropSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Hard JS validation — the browser min= attributes can be bypassed by
+    // direct typing and don't re-validate when an earlier field is moved
+    // forward after a later one was already set.
+    if (formData.transplant_date < formData.start_date) {
+      alert('Transplant date must be after start date');
+      return;
+    }
+    if (formData.expected_end_date < formData.transplant_date) {
+      alert('Expected end date must be after transplant date');
+      return;
+    }
     if (activeCrop) {
       setIsSubmitConfirm(true); // Open inline confirm to archive active first
     } else {
