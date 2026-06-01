@@ -5,9 +5,9 @@ import {
 } from 'lucide-react';
 
 export const Reports: React.FC = () => {
-  const { 
-    crops, inventory, usageLogs, harvests, expenses, weatherLogs, 
-    settings, importBackup 
+  const {
+    crops, inventory, usageLogs, harvests, expenses, weatherLogs,
+    settings, importBackup, authUser
   } = useAppStore();
 
   const [selectedCropId, setSelectedCropId] = useState<string>('');
@@ -148,7 +148,10 @@ export const Reports: React.FC = () => {
   };
 
   const exportBackupJSON = () => {
-    const state = { crops, inventory, usageLogs, harvests, expenses, weatherLogs, settings };
+    const state = {
+      exported_by_user_id: authUser?.id ?? null,
+      crops, inventory, usageLogs, harvests, expenses, weatherLogs, settings,
+    };
     const jsonStr = JSON.stringify(state, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

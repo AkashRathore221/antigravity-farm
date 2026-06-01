@@ -157,6 +157,13 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // so expenses/usage_logs never try to insert before their crop_id FK target exists.
 async function pushAllLocalToSupabase(state: Partial<AppState>): Promise<boolean> {
   let allOk = true;
+  // Build the set of (table, id) pairs with a pending delete in the queue —
+  // any matching upsert is skipped to avoid resurrecting a deleted record.
+  const pendingDeleteKeys = new Set<string>(
+    (state.syncQueue ?? [])
+      .filter(e => e.action === 'delete')
+      .map(e => `${e.table}::${(e.data as { id?: string })?.id ?? ''}`)
+  );
   const orderedTables: Array<{ name: string; rows: unknown[] }> = [
     { name: 'crops',        rows: state.crops        ?? [] },
     { name: 'inventory',    rows: state.inventory     ?? [] },
@@ -171,6 +178,10 @@ async function pushAllLocalToSupabase(state: Partial<AppState>): Promise<boolean
         const id = (row as Record<string, unknown>).id;
         if (typeof id === 'string' && !UUID_RE.test(id)) {
           console.warn(`[Sync] Skipping recovery upsert for ${name}: non-UUID id "${id}"`);
+          return Promise.resolve();
+        }
+        if (typeof id === 'string' && pendingDeleteKeys.has(`${name}::${id}`)) {
+          console.warn(`[Sync] Skipping recovery upsert for ${name} ${id}: pending delete in queue`);
           return Promise.resolve();
         }
         return upsertRow(name, row as Record<string, unknown>).catch(e => {
@@ -326,14 +337,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         data.harvests.length + data.expenses.length + data.weatherLogs.length;
 
       const localState = get();
-      const localTotal =
-        (localState.crops?.length ?? 0) + (localState.inventory?.length ?? 0) +
-        (localState.usageLogs?.length ?? 0) + (localState.harvests?.length ?? 0) +
-        (localState.expenses?.length ?? 0) + (localState.weatherLogs?.length ?? 0);
 
-      if (syncQueue.length > 0 && localTotal > 0) {
-        // Local has pending changes AND actual data — local is authoritative.
-        // Push everything up. Do NOT overwrite local with stale Supabase data.
+      if (syncQueue.length > 0) {
+        // Local has pending changes — local is authoritative regardless of how
+        // many records remain. A queue with ONLY pending deletes (zero local
+        // rows) must still be processed so deletes aren't silently dropped
+        // when the cloud copy is restored over the empty local state.
         const ok = await pushAllLocalToSupabase(get());
         if (ok) {
           set({ syncQueue: [] });
@@ -369,6 +378,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   forceSync: async () => {
     const { crops, inventory, usageLogs, harvests, expenses, weatherLogs, syncQueue, authUser } = get();
     if (!authUser) return false;
+    // Snapshot pending deletes BEFORE we queue any updates — otherwise
+    // addToQueue would dedup them away and the deleted record would be
+    // resurrected by the upsert that follows.
+    const pendingDeleteKeys = new Set<string>(
+      syncQueue
+        .filter(e => e.action === 'delete')
+        .map(e => `${e.table}::${(e.data as { id?: string })?.id ?? ''}`)
+    );
     const tables: Array<{ table: SyncQueueItem['table']; records: unknown[] }> = [
       { table: 'crops',        records: crops },
       { table: 'inventory',    records: inventory },
@@ -380,6 +397,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     let queue = syncQueue;
     for (const { table, records } of tables) {
       for (const record of records) {
+        const recordId = (record as { id?: string }).id;
+        if (typeof recordId === 'string' && pendingDeleteKeys.has(`${table}::${recordId}`)) {
+          console.warn(`[Sync] forceSync skipping ${table} ${recordId}: pending delete in queue`);
+          continue;
+        }
         queue = addToQueue(queue, 'update', table, record);
       }
     }
@@ -463,6 +485,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const parsed = JSON.parse(backupStr);
       if (parsed && typeof parsed === 'object') {
+        // Ownership guard: if the backup was tagged with a different user_id,
+        // require explicit confirmation before clobbering local data.
+        const backupOwner = parsed.exported_by_user_id;
+        const currentUserId = get().authUser?.id;
+        if (backupOwner && currentUserId && backupOwner !== currentUserId) {
+          const proceed = window.confirm(
+            'This backup was created by a different account. Importing it will replace all your current data. Are you sure?'
+          );
+          if (!proceed) return false;
+        }
         const active = parsed.crops?.find((c: Crop) => c.status === 'active')?.id ?? null;
         const s = {
           crops: parsed.crops ?? [], inventory: parsed.inventory ?? [],
@@ -532,10 +564,40 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   deleteCrop: (id) => {
-    const { crops, syncQueue, authUser } = get();
+    const { crops, harvests, expenses, usageLogs, syncQueue, authUser } = get();
     const updatedCrops = crops.filter(c => c.id !== id);
-    const newQueue = addToQueue(syncQueue, 'delete', 'crops', { id });
-    set({ crops: updatedCrops, activeCropId: updatedCrops.find(c => c.status === 'active')?.id ?? null, syncQueue: newQueue });
+    // Cascade: drop local children that referenced this crop and queue/fire
+    // their deletes too — otherwise they become orphans whose totals leak
+    // into "all crops" analytics and whose FKs may already be gone in cloud.
+    const orphanHarvests = harvests.filter(h => h.crop_id === id);
+    const orphanExpenses = expenses.filter(e => e.crop_id === id);
+    const orphanUsageLogs = usageLogs.filter(u => u.crop_id === id);
+    const updatedHarvests = harvests.filter(h => h.crop_id !== id);
+    const updatedExpenses = expenses.filter(e => e.crop_id !== id);
+    const updatedUsageLogs = usageLogs.filter(u => u.crop_id !== id);
+
+    let newQueue = addToQueue(syncQueue, 'delete', 'crops', { id });
+    for (const h of orphanHarvests) {
+      newQueue = addToQueue(newQueue, 'delete', 'harvests', { id: h.id });
+      bgDelete('harvests', h.id, authUser?.id);
+    }
+    for (const e of orphanExpenses) {
+      newQueue = addToQueue(newQueue, 'delete', 'expenses', { id: e.id });
+      bgDelete('expenses', e.id, authUser?.id);
+    }
+    for (const u of orphanUsageLogs) {
+      newQueue = addToQueue(newQueue, 'delete', 'usage_logs', { id: u.id });
+      bgDelete('usage_logs', u.id, authUser?.id);
+    }
+
+    set({
+      crops: updatedCrops,
+      harvests: updatedHarvests,
+      expenses: updatedExpenses,
+      usageLogs: updatedUsageLogs,
+      activeCropId: updatedCrops.find(c => c.status === 'active')?.id ?? null,
+      syncQueue: newQueue,
+    });
     saveLocal(get());
     bgDelete('crops', id, authUser?.id);
   },
@@ -567,7 +629,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateInventory: (id, updates) => {
-    const { inventory, syncQueue, authUser } = get();
+    const { inventory, expenses, syncQueue, authUser } = get();
     const existing = inventory.find(i => i.id === id);
     let finalUpdates = { ...updates };
     // When purchased_qty changes and remaining_qty is not explicitly provided,
@@ -578,8 +640,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const updated = inventory.map(i => i.id === id ? { ...i, ...finalUpdates } : i);
     const updatedItem = updated.find(i => i.id === id);
-    const newQueue = addToQueue(syncQueue, 'update', 'inventory', updatedItem);
-    set({ inventory: updated, syncQueue: newQueue });
+    let newQueue = addToQueue(syncQueue, 'update', 'inventory', updatedItem);
+
+    // Keep the auto-generated 'inventory'-category expense (created by
+    // addInventory) in sync when price or purchased_qty changed — otherwise
+    // every report's cost figures drift permanently after an edit.
+    let updatedExpenses = expenses;
+    const priceChanged = existing && updatedItem && updatedItem.price !== existing.price;
+    const qtyChanged = existing && updatedItem && updatedItem.purchased_qty !== existing.purchased_qty;
+    if (existing && updatedItem && (priceChanged || qtyChanged)) {
+      const sameSecond = existing.created_at.substring(0, 19);
+      const pairedExpense = expenses.find(e =>
+        e.category === 'inventory' && (
+          e.notes.includes(existing.name) ||
+          e.created_at.substring(0, 19) === sameSecond
+        )
+      );
+      if (pairedExpense) {
+        const refreshedExpense = {
+          ...pairedExpense,
+          amount: updatedItem.price,
+          notes: `Purchased ${updatedItem.purchased_qty} ${updatedItem.unit} of ${updatedItem.name} (${updatedItem.brand})`,
+        };
+        updatedExpenses = expenses.map(e => e.id === pairedExpense.id ? refreshedExpense : e);
+        newQueue = addToQueue(newQueue, 'update', 'expenses', refreshedExpense);
+        bgUpsert('expenses', refreshedExpense, authUser?.id);
+      }
+    }
+
+    set({ inventory: updated, expenses: updatedExpenses, syncQueue: newQueue });
     saveLocal(get());
     if (updatedItem) bgUpsert('inventory', updatedItem, authUser?.id);
   },
@@ -759,6 +848,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateWidgetOrder: (newOrder) => get().updateSettings({ widgetsOrder: newOrder }),
 
   updateActiveCropParams: (area, numPlants) => {
+    if (!Number.isFinite(area) || area <= 0) return;
+    if (!Number.isFinite(numPlants) || numPlants <= 0) return;
     const { crops, activeCropId, syncQueue, authUser } = get();
     if (!activeCropId) return;
     const updated = crops.map(c => c.id === activeCropId ? { ...c, area_covered: area, num_plants: numPlants } : c);
