@@ -28,7 +28,7 @@ export const Auth: React.FC = () => {
     setGoogleLoading(true);
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: 'https://antigravity-farm.vercel.app' },
+      options: { redirectTo: window.location.origin },
     });
     if (oauthError) {
       setError(oauthError.message);

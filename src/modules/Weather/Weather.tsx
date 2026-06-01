@@ -301,35 +301,69 @@ export const Weather: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 1 PM daily auto-save
+  // Daily auto-save helper — gated on (a) past 13:00, (b) data loaded, and
+  // (c) no entry for today's date already in the store. Reads weatherLogs
+  // via getState() so it sees fresh data without re-rendering on every log.
+  const tryAutoSaveTodayWeather = useCallback(() => {
+    if (autoSavedTodayRef.current) return;
+    const now = new Date();
+    if (now.getHours() < 13) return;
+    if (!todayWeatherRef.current) return;
+    const today = now.toISOString().split('T')[0];
+    const logs = useAppStore.getState().weatherLogs;
+    if (logs.some(l => l.date === today)) {
+      autoSavedTodayRef.current = true;
+      return;
+    }
+    const tw = todayWeatherRef.current;
+    addWeatherLog({
+      date: today,
+      temp: tw.temp,
+      humidity: tw.humidity,
+      rainfall: tw.rainfall,
+      wind: tw.wind,
+      aqi: 0,
+      uv_index: tw.uvIndex,
+      sunrise: tw.sunrise,
+      sunset: tw.sunset,
+      dew_point: tw.dewPoint,
+      temp_min: tw.tempMin,
+      temp_max: tw.tempMax,
+    });
+    autoSavedTodayRef.current = true;
+  }, [addWeatherLog]);
+
+  // Three triggers + an interval backup so the 13:00 save never slips
+  // through the cracks of a sleeping laptop or backgrounded tab.
   useEffect(() => {
+    // 1. Mount check — fires immediately if conditions already met.
+    tryAutoSaveTodayWeather();
+
+    // 2. Visibility check — fires when the user reopens the tab.
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') tryAutoSaveTodayWeather();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    // 3. Backup interval — last-resort safety net for foregrounded tabs
+    //    that stay open through 13:00 without a visibility event.
     const checkInterval = setInterval(() => {
-      const now = new Date();
-      if (now.getHours() === 13 && !autoSavedTodayRef.current && todayWeatherRef.current) {
-        const tw = todayWeatherRef.current;
-        addWeatherLog({
-          date: new Date().toISOString().split('T')[0],
-          temp: tw.temp,
-          humidity: tw.humidity,
-          rainfall: tw.rainfall,
-          wind: tw.wind,
-          aqi: 0,
-          uv_index: tw.uvIndex,
-          sunrise: tw.sunrise,
-          sunset: tw.sunset,
-          dew_point: tw.dewPoint,
-          temp_min: tw.tempMin,
-          temp_max: tw.tempMax,
-        });
-        autoSavedTodayRef.current = true;
-      }
-      if (now.getHours() === 0) {
-        autoSavedTodayRef.current = false;
-      }
+      tryAutoSaveTodayWeather();
+      // Reset the dedup flag at midnight so the next day can save.
+      if (new Date().getHours() === 0) autoSavedTodayRef.current = false;
     }, 60 * 1000);
 
-    return () => clearInterval(checkInterval);
-  }, [addWeatherLog]);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      clearInterval(checkInterval);
+    };
+  }, [tryAutoSaveTodayWeather]);
+
+  // 4. Re-check whenever fresh weather data arrives — covers the case
+  //    where the user opens the tab at 13:30 and the fetch finishes later.
+  useEffect(() => {
+    if (todayWeather) tryAutoSaveTodayWeather();
+  }, [todayWeather, tryAutoSaveTodayWeather]);
 
   return (
     <div className="space-y-6">

@@ -250,6 +250,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       const newUserId = data.user.id;
       const storedUserId = localStorage.getItem(USER_ID_KEY);
 
+      // Set authUser FIRST — initializeStore and pullFromSupabase below both
+      // read get().authUser. Setting it before they run eliminates any
+      // window where they see null while session is already confirmed.
+      localStorage.setItem(USER_ID_KEY, newUserId);
+      set({ authUser: { id: newUserId, email: data.user.email ?? '' } });
+
       if (storedUserId && storedUserId !== newUserId) {
         // Different user signing in on this device — wipe prior user's local
         // data and queue so no records leak across accounts. Supabase becomes
@@ -271,8 +277,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         await get().initializeStore();
       }
 
-      localStorage.setItem(USER_ID_KEY, newUserId);
-      set({ authUser: { id: newUserId, email: data.user.email ?? '' } });
       await get().pullFromSupabase();
     }
     return null;

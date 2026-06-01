@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppStore, LS_KEY, USER_ID_KEY } from './store/useAppStore';
 import { supabase } from './lib/supabase';
 import { Layout } from './components/Layout';
 import { Auth } from './modules/Auth/Auth';
-import { Sprout } from 'lucide-react';
+import { Sprout, Lock } from 'lucide-react';
 
 // Modules
 import { Dashboard } from './modules/Dashboard/Dashboard';
@@ -18,9 +18,94 @@ import { Reports } from './modules/Reports/Reports';
 import { Reference } from './modules/Reference/Reference';
 import { Settings } from './modules/Settings/Settings';
 
+const PasswordResetModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [pw, setPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (pw.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (pw !== confirmPw) { setError('Passwords do not match.'); return; }
+    setSubmitting(true);
+    const { error: err } = await supabase.auth.updateUser({ password: pw });
+    setSubmitting(false);
+    if (err) { setError(err.message); return; }
+    setSuccess(true);
+    setTimeout(onClose, 1500);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <Lock size={20} />
+          </div>
+          <div>
+            <h3 className="font-heading font-bold text-slate-800 dark:text-slate-100">Set New Password</h3>
+            <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Choose a new password to finish recovery.</p>
+          </div>
+        </div>
+
+        {success ? (
+          <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5">
+            Password updated successfully.
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">New Password</label>
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={pw}
+                onChange={e => setPw(e.target.value)}
+                placeholder="Min. 6 characters"
+                autoComplete="new-password"
+                className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Confirm Password</label>
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={confirmPw}
+                onChange={e => setConfirmPw(e.target.value)}
+                placeholder="Re-enter the same password"
+                autoComplete="new-password"
+                className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+            {error && (
+              <div className="text-xs font-semibold text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">
+                {error}
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-md transition-all"
+            >
+              {submitting ? 'Updating…' : 'Update Password'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+};
+
 function App() {
   const { initializeStore, checkSession, pullFromSupabase, authUser, authLoading, isSyncing } = useAppStore();
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
 
   useEffect(() => {
     // Initial bootstrap. initializeStore is async (it consults the Supabase
@@ -38,6 +123,12 @@ function App() {
     // signOut actions also trigger these events, so we de-dupe by comparing
     // against the current Zustand authUser.
     const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        // User clicked the reset-password link; Supabase has authenticated
+        // them via the magic link. Show the modal so they can pick a new one.
+        setShowPasswordReset(true);
+        return;
+      }
       if (event === 'SIGNED_OUT') {
         if (useAppStore.getState().authUser) {
           useAppStore.setState({ authUser: null });
@@ -122,7 +213,14 @@ function App() {
   }
 
   // Show auth screen when not signed in
-  if (!authUser) return <Auth />;
+  if (!authUser) {
+    return (
+      <>
+        <Auth />
+        {showPasswordReset && <PasswordResetModal onClose={() => setShowPasswordReset(false)} />}
+      </>
+    );
+  }
 
   const renderContent = () => {
     switch (activeTab) {
@@ -142,16 +240,19 @@ function App() {
   };
 
   return (
-    <Layout activeTab={activeTab} setActiveTab={setActiveTab}>
-      {/* Sync indicator */}
-      {isSyncing && (
-        <div className="fixed top-4 right-4 z-50 flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-full backdrop-blur-sm">
-          <div className="w-3 h-3 border border-emerald-400/40 border-t-emerald-400 rounded-full animate-spin" />
-          Syncing…
-        </div>
-      )}
-      {renderContent()}
-    </Layout>
+    <>
+      <Layout activeTab={activeTab} setActiveTab={setActiveTab}>
+        {/* Sync indicator */}
+        {isSyncing && (
+          <div className="fixed top-4 right-4 z-50 flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-full backdrop-blur-sm">
+            <div className="w-3 h-3 border border-emerald-400/40 border-t-emerald-400 rounded-full animate-spin" />
+            Syncing…
+          </div>
+        )}
+        {renderContent()}
+      </Layout>
+      {showPasswordReset && <PasswordResetModal onClose={() => setShowPasswordReset(false)} />}
+    </>
   );
 }
 
