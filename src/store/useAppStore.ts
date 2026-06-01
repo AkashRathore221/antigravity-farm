@@ -709,9 +709,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   deleteInventory: (id) => {
-    const { inventory, syncQueue, authUser } = get();
-    const newQueue = addToQueue(syncQueue, 'delete', 'inventory', { id });
-    set({ inventory: inventory.filter(i => i.id !== id), syncQueue: newQueue });
+    const { inventory, usageLogs, syncQueue, authUser } = get();
+    let newQueue = addToQueue(syncQueue, 'delete', 'inventory', { id });
+    // Null out the foreign-key reference in every usage_log that pointed at
+    // this inventory item — otherwise the logs keep a dangling inventory_id
+    // that the UI can't resolve and Supabase FK constraints would reject.
+    const affectedLogs = usageLogs.filter(l => l.inventory_id === id);
+    const updatedLogs = usageLogs.map(l =>
+      l.inventory_id === id ? { ...l, inventory_id: null } : l
+    );
+    for (const log of affectedLogs) {
+      const cleaned = { ...log, inventory_id: null };
+      newQueue = addToQueue(newQueue, 'update', 'usage_logs', cleaned);
+      bgUpsert('usage_logs', cleaned, authUser?.id);
+    }
+    set({ inventory: inventory.filter(i => i.id !== id), usageLogs: updatedLogs, syncQueue: newQueue });
     saveLocal(get());
     bgDelete('inventory', id, authUser?.id);
   },

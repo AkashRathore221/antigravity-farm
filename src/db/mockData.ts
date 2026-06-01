@@ -493,7 +493,7 @@ export const defaultSettings: AppSettings = {
       'sticky_traps',
       'packaging_material'
     ],
-    expense: ['labour', 'inventory', 'transport', 'packaging', 'miscellaneous']
+    expense: ['labour', 'inventory', 'transport', 'packaging', 'personal_vehicle_fuel', 'miscellaneous']
   },
   fields: {
     mandiRate: true,

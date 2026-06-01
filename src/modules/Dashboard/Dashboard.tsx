@@ -110,8 +110,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
     };
   }).sort((a, b) => a.daysRemaining - b.daysRemaining);
 
-  // 4. Latest Weather Log
-  const latestWeather = weatherLogs.length > 0 ? weatherLogs[0] : null;
+  // 4. Latest Weather Log — sort by date so the result doesn't depend on
+  //    the store's insertion order (which can drift after a Supabase pull).
+  const latestWeather = weatherLogs.length > 0
+    ? [...weatherLogs].sort((a, b) => b.date.localeCompare(a.date))[0]
+    : null;
 
   // 5. Sparkline Helpers
   const getSparklinePath = (data: number[], width: number, height: number): string => {
@@ -589,7 +592,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
       case 'activityFeed': {
         const recentLogs = [
           ...harvests.map(h => ({ type: 'harvest' as const, date: h.date, desc: `Harvested ${h.weight_total}kg Grade A/B cucumber. Revenue ₹${h.revenue.toFixed(0)}` })),
-          ...usageLogs.map(u => ({ type: 'usage' as const, date: u.date, desc: `Applied ${u.quantity_used}${u.unit} of ${u.product_name} (${u.type})` }))
+          ...usageLogs.map(u => ({ type: 'usage' as const, date: u.date, desc: `Applied ${u.quantity_used}${u.unit} of ${u.product_name} (${u.type})` })),
+          ...expenses.map(e => ({ type: 'expense' as const, date: e.date, desc: `${e.category.replace('_', ' ')} — ₹${e.amount.toFixed(0)}` })),
         ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 4);
 
         return (

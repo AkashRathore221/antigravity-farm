@@ -112,6 +112,7 @@ export const Inventory: React.FC = () => {
   const adjustStock = (id: string, delta: number) => {
     const item = inventory.find(i => i.id === id);
     if (!item) return;
+    if (delta > 0 && item.remaining_qty >= item.purchased_qty) return;
     const newQty = Math.max(0, parseFloat((item.remaining_qty + delta).toFixed(2)));
     updateInventory(id, { remaining_qty: newQty });
   };

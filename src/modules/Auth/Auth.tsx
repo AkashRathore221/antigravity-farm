@@ -40,6 +40,10 @@ export const Auth: React.FC = () => {
     e.preventDefault();
     setError(null);
     setInfo(null);
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
     setLoading(true);
 
     if (mode === 'signin') {
@@ -150,6 +154,7 @@ export const Auth: React.FC = () => {
                 <input
                   type={showPass ? 'text' : 'password'}
                   required
+                  minLength={6}
                   autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
                   placeholder="Min. 6 characters"
                   value={password}
