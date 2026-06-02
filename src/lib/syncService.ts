@@ -1,7 +1,68 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// SYNC ARCHITECTURE — read this before changing anything in the sync layer.
+//
+// This file is the low-level Supabase I/O layer. The high-level orchestration
+// lives in src/store/useAppStore.ts. Together they implement an offline-first,
+// queue-drained, single-flight reconcile model. The pieces:
+//
+// 1. MUTATIONS (store actions) are the only writers of local state. Each one:
+//      a. updates Zustand + localStorage immediately (optimistic),
+//      b. appends ONE op to `syncQueue` (the durable record of un-confirmed
+//         writes), capturing that entry's id,
+//      c. fires an optimistic bgUpsert/bgDelete that, on SUCCESS, removes its
+//         own queue entry. The queue therefore drains entry-by-entry — there is
+//         no periodic "push the whole dataset" anymore.
+//
+// 2. THE SYNC QUEUE is the source of truth for "what still needs to reach the
+//    cloud". It is capped (FIFO) but eviction keeps delete ops preferentially,
+//    because a dropped delete silently resurrects data while a dropped
+//    insert/update is re-derivable from local state via forceSync.
+//
+// 3. pullFromSupabase IS THE SINGLE RECONCILE PATH. It is single-flight (a
+//    module-level in-flight promise coalesces concurrent callers — bootstrap,
+//    SIGNED_IN, the online listener, and the 30s retry can all call it safely).
+//    Order matters:
+//      Step 1: drainQueue() — push pending ops. This runs INDEPENDENTLY of the
+//              read step, so a failed table read can never block the push.
+//      Step 2: pullAllData() — fetches every table INDEPENDENTLY via
+//              Promise.allSettled; each table reports its own `ok` flag.
+//      Step 3: per-record merge, only for tables whose read succeeded:
+//                - cloud-only id      → add it, unless a local delete is pending
+//                - id in both         → if the id has ANY pending queue op, keep
+//                                       local (un-synced edit wins); otherwise
+//                                       the newer recordTimestamp() wins
+//                - local-only id      → keep (pulls never delete; deletes flow
+//                                       only through the queue)
+//              Tables whose read failed are left entirely untouched.
+//
+// 4. CONFLICTS use recordTimestamp() = updated_at ?? created_at. NOTE: the
+//    schema currently has no `updated_at` column, so this degrades to
+//    created_at (which does not change on update). The pending-queue guard
+//    above is what actually prevents un-synced local edits from being
+//    clobbered today. Adding an `updated_at` column (DB migration + type +
+//    setting it on every write) would make multi-device newer-wins fully
+//    effective with NO change to this merge logic.
+//
+// Invariants to preserve:
+//   - A read error must never abort the push (Step 1 before Step 2).
+//   - Never overwrite/remove a local record that has a pending queue op.
+//   - Never delete a local record during a pull.
+//   - pullFromSupabase must remain single-flight.
+// ─────────────────────────────────────────────────────────────────────────────
 import type { Crop, InventoryItem, UsageLog, Harvest, Expense, WeatherLog } from '../db/types';
 import { supabase } from './supabase';
 
 type AnyRecord = Record<string, unknown>;
+
+// Conflict-resolution timestamp for a record. Prefers updated_at (not yet in
+// the schema — see architecture note) and falls back to created_at.
+export function recordTimestamp(r: AnyRecord): string {
+  const updated = r.updated_at;
+  const created = r.created_at;
+  if (typeof updated === 'string') return updated;
+  if (typeof created === 'string') return created;
+  return '';
+}
 
 // Per-table column allowlist — must match the Supabase table schemas. Any key
 // present on the local object but missing from this list is stripped before
@@ -40,7 +101,7 @@ function fromDbRow<T>(row: AnyRecord): T {
   return { ...rest, tenant_id: 'tenant-1' } as T;
 }
 
-function logSupabaseError(op: 'upsert' | 'delete', table: string, error: { message?: string; code?: string; details?: string; hint?: string }, extra: AnyRecord): void {
+function logSupabaseError(op: 'upsert' | 'delete' | 'pull', table: string, error: { message?: string; code?: string; details?: string; hint?: string }, extra: AnyRecord): void {
   console.error(
     `[Sync] Supabase ${op} failed for ${table}:`,
     `\n  message: ${error.message ?? '(none)'}`,
@@ -51,24 +112,66 @@ function logSupabaseError(op: 'upsert' | 'delete', table: string, error: { messa
   );
 }
 
-export async function pullAllData(userId: string) {
-  const [crops, inventory, usageLogs, harvests, expenses, weatherLogs] = await Promise.all([
-    supabase.from('crops').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-    supabase.from('inventory').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-    supabase.from('usage_logs').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-    supabase.from('harvests').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-    supabase.from('expenses').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-    supabase.from('weather_logs').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+// Per-table fetch result. `ok` is false when that table's read errored OR the
+// network rejected — callers must skip merging a table whose ok is false so a
+// single failing table never wipes or blocks the others.
+export interface TableResult<T> {
+  rows: T[];
+  ok: boolean;
+}
+
+// Fetch one table independently. supabase-js resolves with { data, error }
+// rather than rejecting, but we also guard against a thrown/rejected network
+// error so a single table can fail in isolation.
+async function fetchTable<T>(table: string, userId: string): Promise<TableResult<T>> {
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (error) {
+      logSupabaseError('pull', table, error, {});
+      return { rows: [], ok: false };
+    }
+    return { rows: (data ?? []).map(r => fromDbRow<T>(r as AnyRecord)), ok: true };
+  } catch (e) {
+    console.error(`[Sync] Network error fetching ${table}:`, e);
+    return { rows: [], ok: false };
+  }
+}
+
+export interface PullResult {
+  crops: TableResult<Crop>;
+  inventory: TableResult<InventoryItem>;
+  usageLogs: TableResult<UsageLog>;
+  harvests: TableResult<Harvest>;
+  expenses: TableResult<Expense>;
+  weatherLogs: TableResult<WeatherLog>;
+}
+
+// Fetch every table INDEPENDENTLY (Promise.allSettled). One table failing
+// leaves its result as { rows: [], ok: false } and never affects the others.
+export async function pullAllData(userId: string): Promise<PullResult> {
+  const [crops, inventory, usageLogs, harvests, expenses, weatherLogs] = await Promise.allSettled([
+    fetchTable<Crop>('crops', userId),
+    fetchTable<InventoryItem>('inventory', userId),
+    fetchTable<UsageLog>('usage_logs', userId),
+    fetchTable<Harvest>('harvests', userId),
+    fetchTable<Expense>('expenses', userId),
+    fetchTable<WeatherLog>('weather_logs', userId),
   ]);
 
+  const unwrap = <T>(r: PromiseSettledResult<TableResult<T>>): TableResult<T> =>
+    r.status === 'fulfilled' ? r.value : { rows: [], ok: false };
+
   return {
-    crops: (crops.data ?? []).map(r => fromDbRow<Crop>(r as AnyRecord)),
-    inventory: (inventory.data ?? []).map(r => fromDbRow<InventoryItem>(r as AnyRecord)),
-    usageLogs: (usageLogs.data ?? []).map(r => fromDbRow<UsageLog>(r as AnyRecord)),
-    harvests: (harvests.data ?? []).map(r => fromDbRow<Harvest>(r as AnyRecord)),
-    expenses: (expenses.data ?? []).map(r => fromDbRow<Expense>(r as AnyRecord)),
-    weatherLogs: (weatherLogs.data ?? []).map(r => fromDbRow<WeatherLog>(r as AnyRecord)),
-    errors: [crops.error, inventory.error, usageLogs.error, harvests.error, expenses.error, weatherLogs.error].filter(Boolean),
+    crops: unwrap(crops),
+    inventory: unwrap(inventory),
+    usageLogs: unwrap(usageLogs),
+    harvests: unwrap(harvests),
+    expenses: unwrap(expenses),
+    weatherLogs: unwrap(weatherLogs),
   };
 }
 

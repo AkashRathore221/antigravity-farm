@@ -157,10 +157,13 @@ function App() {
       // the bootstrap above.
     });
 
-    // Auto-retry 1: when the device comes back online, flush queued writes.
+    // Auto-retry 1: when the device comes back online, ALWAYS reconcile — not
+    // only when we have pending writes. pullFromSupabase drains the queue AND
+    // pulls remote changes, so this also picks up edits made on other devices
+    // while we were offline. It is single-flight, so a concurrent pull is safe.
     const handleOnline = () => {
-      const { authUser: user, syncQueue } = useAppStore.getState();
-      if (user && syncQueue.length > 0) {
+      const { authUser: user } = useAppStore.getState();
+      if (user) {
         void useAppStore.getState().pullFromSupabase();
       }
     };

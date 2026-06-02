@@ -6,7 +6,7 @@ import {
   mockCrops, mockInventory, mockUsageLogs, mockHarvests, mockExpenses, mockWeatherLogs, defaultSettings
 } from '../db/mockData';
 import { supabase } from '../lib/supabase';
-import { pullAllData, upsertRow, deleteRow } from '../lib/syncService';
+import { pullAllData, upsertRow, deleteRow, recordTimestamp } from '../lib/syncService';
 
 // ─── Auth user shape ───────────────────────────────────────────────────────────
 interface AuthUser {
@@ -117,8 +117,34 @@ function addToQueue(
       })
     : queue;
   const result = [...deduped, newEntry];
-  // Cap at 500 to prevent localStorage overflow on prolonged offline use.
-  return result.length > 500 ? result.slice(-500) : result;
+  // Cap the queue to bound localStorage use on prolonged offline sessions.
+  // Eviction is FIFO but preferentially KEEPS delete ops: a dropped delete
+  // silently resurrects data on the next pull, whereas a dropped insert/update
+  // is still recoverable from local state via forceSync. So we drop the oldest
+  // non-delete entries first, and only drop deletes if the queue is somehow
+  // still over cap after that (queue made up almost entirely of deletes).
+  const QUEUE_CAP = 2000;
+  if (result.length <= QUEUE_CAP) return result;
+  let toDrop = result.length - QUEUE_CAP;
+  const trimmed: SyncQueueItem[] = [];
+  for (const item of result) {
+    if (toDrop > 0 && item.action !== 'delete') { toDrop--; continue; }
+    trimmed.push(item);
+  }
+  return trimmed.length > QUEUE_CAP ? trimmed.slice(trimmed.length - QUEUE_CAP) : trimmed;
+}
+
+// Remove a single queue entry by its unique entry id (NOT the record id) and
+// persist. Called by bgUpsert/bgDelete on confirmed success so the queue
+// drains entry-by-entry instead of being re-pushed wholesale. Race-safe:
+// addToQueue dedups per (table, recordId), so a superseded write's entry id is
+// already gone and this becomes a harmless no-op while the newer entry survives.
+function removeQueueEntry(entryId: string | undefined) {
+  if (!entryId) return;
+  const st = useAppStore.getState();
+  if (!st.syncQueue.some(e => e.id === entryId)) return;
+  useAppStore.setState({ syncQueue: st.syncQueue.filter(e => e.id !== entryId) });
+  saveLocal(useAppStore.getState());
 }
 
 function saveLocal(state: Partial<AppState>) {
@@ -139,20 +165,38 @@ function saveLocal(state: Partial<AppState>) {
 // Fire-and-forget Supabase upsert — never blocks the UI.
 // userId guard is a fast-fail using the store's cached auth state;
 // upsertRow re-verifies via supabase.auth.getUser() before writing.
-// upsertRow / deleteRow log structured Supabase errors (message/code/details/
-// hint/payload) themselves; the catches here just tag the failure source so a
-// reader can tell async background writes apart from foreground recovery pushes.
-function bgUpsert(table: string, obj: unknown, userId: string | undefined) {
+// On SUCCESS the matching queue entry (entryId) is removed so the syncQueue
+// drains entry-by-entry; on failure the entry stays and drainQueue retries it.
+// upsertRow / deleteRow log structured Supabase errors themselves; the catches
+// here just tag the failure source.
+function bgUpsert(table: string, obj: unknown, userId: string | undefined, entryId?: string) {
   if (!userId) return;
-  void upsertRow(table, obj as Record<string, unknown>).catch((e: { message?: string }) => {
-    console.error(`[Sync] bgUpsert(${table}) rejected:`, e?.message ?? e);
-  });
+  void upsertRow(table, obj as Record<string, unknown>)
+    .then(() => removeQueueEntry(entryId))
+    .catch((e: { message?: string }) => {
+      console.error(`[Sync] bgUpsert(${table}) rejected:`, e?.message ?? e);
+    });
 }
-function bgDelete(table: string, id: string, userId: string | undefined) {
+function bgDelete(table: string, id: string, userId: string | undefined, entryId?: string) {
   if (!userId) return;
-  void deleteRow(table, id).catch((e: { message?: string }) => {
-    console.error(`[Sync] bgDelete(${table}, ${id}) rejected:`, e?.message ?? e);
-  });
+  void deleteRow(table, id)
+    .then(() => removeQueueEntry(entryId))
+    .catch((e: { message?: string }) => {
+      console.error(`[Sync] bgDelete(${table}, ${id}) rejected:`, e?.message ?? e);
+    });
+}
+
+// Resolve the queue entry id that addToQueue just created/replaced for a given
+// (table, recordId). addToQueue dedups so there is at most one match.
+function queueEntryIdFor(queue: SyncQueueItem[], table: SyncQueueItem['table'], recordId: string | undefined): string | undefined {
+  if (!recordId) return undefined;
+  for (let i = queue.length - 1; i >= 0; i--) {
+    const item = queue[i];
+    const itemId = item.data && typeof item.data === 'object' && 'id' in (item.data as object)
+      ? (item.data as { id: string }).id : null;
+    if (item.table === table && itemId === recordId) return item.id;
+  }
+  return undefined;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -173,13 +217,14 @@ function normalizeActiveCrops(crops: Crop[]): Crop[] {
   );
 }
 
-// One-time data-repair: re-point orphaned children at the active crop.
-// A harvest / expense / usage_log can end up with a crop_id that matches no
-// existing crop — e.g. it was created against a temporary or mock crop id
-// before the real Supabase crop id was assigned. Such rows silently vanish
-// from every per-crop view. Reassign each orphan to the current active crop.
-// Returns the corrected arrays plus the records that were changed so the
-// caller can persist them locally and queue them for sync.
+// One-time data-repair: re-point TRULY orphaned children at the active crop.
+// A harvest / expense / usage_log is an orphan ONLY if its crop_id matches NO
+// crop at all — active OR archived (e.g. it was created against a temporary or
+// mock crop id before the real Supabase crop id was assigned). A record whose
+// crop_id belongs to an *archived* crop is NOT an orphan and is left untouched
+// — `validIds` below includes every crop regardless of status, so archived
+// history is never yanked into the active crop. Returns the corrected arrays
+// plus the records that were changed so the caller can persist + queue them.
 function reassignOrphanedChildren(s: {
   crops: Crop[]; harvests: Harvest[]; expenses: Expense[]; usageLogs: UsageLog[];
 }): {
@@ -191,6 +236,7 @@ function reassignOrphanedChildren(s: {
   if (!activeCrop) {
     return { harvests: s.harvests, expenses: s.expenses, usageLogs: s.usageLogs, changed: empty };
   }
+  // Includes ALL crops (active + archived) — so only true orphans get reassigned.
   const validIds = new Set(s.crops.map(c => c.id));
   const changedHarvests: Harvest[] = [];
   const changedExpenses: Expense[] = [];
@@ -273,6 +319,59 @@ async function pushAllLocalToSupabase(state: Partial<AppState>): Promise<boolean
   );
   return allOk;
 }
+
+// FK dependency order: parents (crops/inventory) before children so an
+// expense/usage_log/harvest never tries to insert before its crop_id target.
+const FK_ORDER: SyncQueueItem['table'][] = ['crops', 'inventory', 'weather_logs', 'usage_logs', 'harvests', 'expenses'];
+
+// Drain the sync queue entry-by-entry. Upserts run first in FK order, then
+// deletes (children-before-parents not required — Supabase cascades). Each
+// entry is removed ONLY on confirmed success, so a failure leaves it queued
+// for the next drain. This replaces the old "re-push the entire dataset"
+// recovery: only what is actually queued is sent.
+async function drainQueue(): Promise<void> {
+  const { syncQueue, authUser } = useAppStore.getState();
+  if (!authUser || syncQueue.length === 0) return;
+
+  const upserts = syncQueue
+    .filter(e => e.action !== 'delete')
+    .sort((a, b) => FK_ORDER.indexOf(a.table) - FK_ORDER.indexOf(b.table));
+  const deletes = syncQueue.filter(e => e.action === 'delete');
+
+  for (const entry of upserts) {
+    const id = (entry.data as { id?: string })?.id;
+    if (typeof id !== 'string') { removeQueueEntry(entry.id); continue; }
+    if (!UUID_RE.test(id)) {
+      // Mock/legacy non-UUID row — Supabase would reject it; drop it from the
+      // queue so it can't block the drain forever (it still lives locally).
+      console.warn(`[Sync] Dropping non-UUID queue entry for ${entry.table}: "${id}"`);
+      removeQueueEntry(entry.id);
+      continue;
+    }
+    try {
+      await upsertRow(entry.table, entry.data as Record<string, unknown>);
+      removeQueueEntry(entry.id);
+    } catch {
+      /* leave queued; logged in upsertRow */
+    }
+  }
+
+  for (const entry of deletes) {
+    const id = (entry.data as { id?: string })?.id;
+    if (typeof id !== 'string') { removeQueueEntry(entry.id); continue; }
+    try {
+      await deleteRow(entry.table, id);
+      removeQueueEntry(entry.id);
+    } catch {
+      /* leave queued; logged in deleteRow */
+    }
+  }
+}
+
+// Single-flight guard for pullFromSupabase. Concurrent callers (bootstrap,
+// SIGNED_IN, the online listener, the 30s retry) all coalesce onto the one
+// in-flight reconcile instead of racing.
+let pullInFlight: Promise<void> | null = null;
 
 // ─── Store ─────────────────────────────────────────────────────────────────────
 export const useAppStore = create<AppState>((set, get) => ({
@@ -359,14 +458,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   signOut: async () => {
     const { syncQueue, authUser } = get();
-    // 1. Push any pending changes BEFORE clearing local data. Capture whether
-    //    the push fully succeeded so we can decide if it's safe to wipe LS.
+    // 1. Drain pending writes BEFORE clearing local data. drainQueue removes
+    //    each entry only on success, so a non-empty queue afterwards means
+    //    something didn't reach the cloud and LS must be preserved.
     let pushOk = true;
     if (authUser && syncQueue.length > 0) {
       try {
-        pushOk = await pushAllLocalToSupabase(get());
+        await drainQueue();
+        pushOk = get().syncQueue.length === 0;
       } catch (e) {
-        console.error('[Sync] Final push on signOut threw:', e);
+        console.error('[Sync] Final drain on signOut threw:', e);
         pushOk = false;
       }
     }
@@ -393,80 +494,101 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  pullFromSupabase: async () => {
-    const { authUser, syncQueue } = get();
-    if (!authUser) return;
-    set({ isSyncing: true });
-    try {
-      const data = await pullAllData(authUser.id);
+  // Single reconcile path. Single-flight (coalesces concurrent callers).
+  // Order: (1) drain the queue — push pending ops, INDEPENDENT of reads so a
+  // read failure never blocks the push; (2) fetch each table independently;
+  // (3) per-record merge guarded by the queue + timestamps; (4) orphan repair.
+  pullFromSupabase: () => {
+    if (pullInFlight) return pullInFlight;
+    pullInFlight = (async () => {
+      const { authUser } = get();
+      if (!authUser) return;
+      set({ isSyncing: true });
+      try {
+        // Step 1 — push pending writes first. Runs regardless of read outcome.
+        await drainQueue();
 
-      if (data.errors.length > 0) {
-        // Supabase returned errors — preserve local state unchanged to avoid data loss
-        console.error('[Sync] pullFromSupabase errors:', data.errors);
-        return;
-      }
+        // Step 2 — fetch every table independently (one failure ≠ total failure).
+        const data = await pullAllData(authUser.id);
 
-      const cloudTotal =
-        data.crops.length + data.inventory.length + data.usageLogs.length +
-        data.harvests.length + data.expenses.length + data.weatherLogs.length;
-
-      const localState = get();
-
-      if (syncQueue.length > 0) {
-        // Local has pending changes — local is authoritative regardless of how
-        // many records remain. A queue with ONLY pending deletes (zero local
-        // rows) must still be processed so deletes aren't silently dropped
-        // when the cloud copy is restored over the empty local state.
-        const ok = await pushAllLocalToSupabase(get());
-        if (ok) {
-          set({ syncQueue: [] });
-          saveLocal(get());
+        // Step 3 — per-record merge, only for tables whose read succeeded.
+        // Pending ids (any action) are protected: never overwritten/re-added.
+        const local = get();
+        const pendingByTable: Record<string, Set<string>> = {};
+        for (const e of local.syncQueue) {
+          const rid = (e.data as { id?: string })?.id;
+          if (typeof rid !== 'string') continue;
+          (pendingByTable[e.table] ??= new Set()).add(rid);
         }
-        // If push failed: leave syncQueue intact so the next refresh retries automatically.
-      } else if (cloudTotal > 0) {
-        // Supabase has records and local has nothing pending. Per-table merge:
-        // ONLY overwrite a table when cloud has rows for it. For tables where
-        // cloud returned 0 rows, keep the existing local data — this prevents
-        // a partial Supabase sync (e.g. inventory synced but harvests didn't)
-        // from wiping the local copy of the missing tables.
-        const merged = {
-          crops:       data.crops.length        > 0 ? data.crops        : localState.crops,
-          inventory:   data.inventory.length    > 0 ? data.inventory    : localState.inventory,
-          usageLogs:   data.usageLogs.length    > 0 ? data.usageLogs    : localState.usageLogs,
-          harvests:    data.harvests.length     > 0 ? data.harvests     : localState.harvests,
-          expenses:    data.expenses.length     > 0 ? data.expenses     : localState.expenses,
-          weatherLogs: data.weatherLogs.length  > 0 ? data.weatherLogs  : localState.weatherLogs,
-        };
-        const activeCropId = merged.crops.find(c => c.status === 'active')?.id ?? null;
-        set({ ...merged, activeCropId, syncQueue: [] });
-        saveLocal(get());
-      }
-      // Both empty: new user or mock-only state — leave local untouched.
 
-      // Repair orphaned children whose crop_id no longer matches a real crop
-      // (data drift from temporary/mock crop ids). Reassign to the active
-      // crop, persist locally, and queue + push the fixes so the cloud is
-      // corrected too — otherwise the next pull would re-introduce the drift.
-      const cur = get();
-      const repaired = reassignOrphanedChildren(cur);
-      const changedCount =
-        repaired.changed.harvests.length +
-        repaired.changed.expenses.length +
-        repaired.changed.usageLogs.length;
-      if (changedCount > 0) {
-        let q = cur.syncQueue;
-        for (const h of repaired.changed.harvests) { q = addToQueue(q, 'update', 'harvests', h); bgUpsert('harvests', h, authUser.id); }
-        for (const e of repaired.changed.expenses) { q = addToQueue(q, 'update', 'expenses', e); bgUpsert('expenses', e, authUser.id); }
-        for (const u of repaired.changed.usageLogs) { q = addToQueue(q, 'update', 'usage_logs', u); bgUpsert('usage_logs', u, authUser.id); }
-        set({ harvests: repaired.harvests, expenses: repaired.expenses, usageLogs: repaired.usageLogs, syncQueue: q });
+        function mergeTable<T extends { id: string; created_at?: string }>(
+          table: SyncQueueItem['table'], localRows: T[], result: { rows: T[]; ok: boolean },
+        ): T[] {
+          if (!result.ok) return localRows; // failed read → leave local untouched
+          const pending = pendingByTable[table] ?? new Set<string>();
+          const byId = new Map(localRows.map(r => [r.id, r]));
+          for (const cloud of result.rows) {
+            if (pending.has(cloud.id)) continue; // un-synced local change/delete wins
+            const existing = byId.get(cloud.id);
+            if (!existing) { byId.set(cloud.id, cloud); continue; } // cloud-only → add
+            // Both exist, no pending local op → newer wins (cloud on tie).
+            if (recordTimestamp(cloud as Record<string, unknown>) >= recordTimestamp(existing as Record<string, unknown>)) {
+              byId.set(cloud.id, cloud);
+            }
+          }
+          // Local-only rows are kept (a pull never deletes; deletes flow only
+          // through the queue), so the Map already preserves them.
+          return Array.from(byId.values());
+        }
+
+        const mergedCrops       = mergeTable('crops',        local.crops,       data.crops);
+        const mergedInventory   = mergeTable('inventory',    local.inventory,   data.inventory);
+        const mergedUsageLogs   = mergeTable('usage_logs',   local.usageLogs,   data.usageLogs);
+        const mergedHarvests    = mergeTable('harvests',     local.harvests,    data.harvests);
+        const mergedExpenses    = mergeTable('expenses',     local.expenses,    data.expenses);
+        const mergedWeatherLogs = mergeTable('weather_logs', local.weatherLogs, data.weatherLogs);
+
+        const normalizedCrops = normalizeActiveCrops(mergedCrops);
+        const activeCropId = normalizedCrops.find(c => c.status === 'active')?.id ?? null;
+        set({
+          crops: normalizedCrops,
+          inventory: mergedInventory,
+          usageLogs: mergedUsageLogs,
+          harvests: mergedHarvests,
+          expenses: mergedExpenses,
+          weatherLogs: mergedWeatherLogs,
+          activeCropId,
+        });
         saveLocal(get());
-        console.warn(`[Migration] Reassigned ${changedCount} orphaned record(s) to active crop ${cur.crops.find(c => c.status === 'active')?.id}`);
+
+        // Step 4 — repair true orphans (crop_id in NO crop). Reassign to the
+        // active crop, persist, and queue + optimistically push the fixes.
+        const cur = get();
+        const repaired = reassignOrphanedChildren(cur);
+        const changedCount =
+          repaired.changed.harvests.length +
+          repaired.changed.expenses.length +
+          repaired.changed.usageLogs.length;
+        if (changedCount > 0) {
+          let q = cur.syncQueue;
+          for (const h of repaired.changed.harvests) q = addToQueue(q, 'update', 'harvests', h);
+          for (const e of repaired.changed.expenses) q = addToQueue(q, 'update', 'expenses', e);
+          for (const u of repaired.changed.usageLogs) q = addToQueue(q, 'update', 'usage_logs', u);
+          set({ harvests: repaired.harvests, expenses: repaired.expenses, usageLogs: repaired.usageLogs, syncQueue: q });
+          saveLocal(get());
+          for (const h of repaired.changed.harvests) bgUpsert('harvests', h, authUser.id, queueEntryIdFor(q, 'harvests', h.id));
+          for (const e of repaired.changed.expenses) bgUpsert('expenses', e, authUser.id, queueEntryIdFor(q, 'expenses', e.id));
+          for (const u of repaired.changed.usageLogs) bgUpsert('usage_logs', u, authUser.id, queueEntryIdFor(q, 'usage_logs', u.id));
+          console.warn(`[Migration] Reassigned ${changedCount} orphaned record(s) to active crop ${activeCropId}`);
+        }
+      } catch (err) {
+        console.error('[Sync] pullFromSupabase threw:', err);
+      } finally {
+        set({ isSyncing: false });
+        pullInFlight = null;
       }
-    } catch (err) {
-      console.error('[Sync] pullFromSupabase threw:', err);
-    } finally {
-      set({ isSyncing: false });
-    }
+    })();
+    return pullInFlight;
   },
 
   forceSync: async () => {
@@ -641,15 +763,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newCrop: Crop = { ...cropData, id: newId('crop'), tenant_id: 'tenant-1', status: 'active', created_at: new Date().toISOString() };
     const finalCrops = [newCrop, ...updatedCrops];
     let newQueue = addToQueue(syncQueue, 'insert', 'crops', newCrop);
+    let archivedCrop: Crop | null = null;
     // Also sync the crop that just got archived so Supabase status is updated.
     if (previouslyActive) {
-      const archivedCrop = { ...previouslyActive, status: 'archived' as const, end_date: today };
+      archivedCrop = { ...previouslyActive, status: 'archived' as const, end_date: today };
       newQueue = addToQueue(newQueue, 'update', 'crops', archivedCrop);
-      bgUpsert('crops', archivedCrop, authUser?.id);
     }
     set({ crops: finalCrops, activeCropId: newCrop.id, syncQueue: newQueue });
     saveLocal(get());
-    bgUpsert('crops', newCrop, authUser?.id);
+    bgUpsert('crops', newCrop, authUser?.id, queueEntryIdFor(newQueue, 'crops', newCrop.id));
+    if (archivedCrop) bgUpsert('crops', archivedCrop, authUser?.id, queueEntryIdFor(newQueue, 'crops', archivedCrop.id));
   },
 
   endCrop: (id) => {
@@ -662,7 +785,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newQueue = addToQueue(syncQueue, 'update', 'crops', archived);
     set({ crops: updatedCrops, activeCropId: null, syncQueue: newQueue });
     saveLocal(get());
-    if (archived) bgUpsert('crops', archived, authUser?.id);
+    if (archived) bgUpsert('crops', archived, authUser?.id, queueEntryIdFor(newQueue, 'crops', archived.id));
   },
 
   deleteCrop: (id) => {
@@ -679,18 +802,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const updatedUsageLogs = usageLogs.filter(u => u.crop_id !== id);
 
     let newQueue = addToQueue(syncQueue, 'delete', 'crops', { id });
-    for (const h of orphanHarvests) {
-      newQueue = addToQueue(newQueue, 'delete', 'harvests', { id: h.id });
-      bgDelete('harvests', h.id, authUser?.id);
-    }
-    for (const e of orphanExpenses) {
-      newQueue = addToQueue(newQueue, 'delete', 'expenses', { id: e.id });
-      bgDelete('expenses', e.id, authUser?.id);
-    }
-    for (const u of orphanUsageLogs) {
-      newQueue = addToQueue(newQueue, 'delete', 'usage_logs', { id: u.id });
-      bgDelete('usage_logs', u.id, authUser?.id);
-    }
+    for (const h of orphanHarvests) newQueue = addToQueue(newQueue, 'delete', 'harvests', { id: h.id });
+    for (const e of orphanExpenses) newQueue = addToQueue(newQueue, 'delete', 'expenses', { id: e.id });
+    for (const u of orphanUsageLogs) newQueue = addToQueue(newQueue, 'delete', 'usage_logs', { id: u.id });
 
     set({
       crops: updatedCrops,
@@ -701,7 +815,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       syncQueue: newQueue,
     });
     saveLocal(get());
-    bgDelete('crops', id, authUser?.id);
+    bgDelete('crops', id, authUser?.id, queueEntryIdFor(newQueue, 'crops', id));
+    for (const h of orphanHarvests) bgDelete('harvests', h.id, authUser?.id, queueEntryIdFor(newQueue, 'harvests', h.id));
+    for (const e of orphanExpenses) bgDelete('expenses', e.id, authUser?.id, queueEntryIdFor(newQueue, 'expenses', e.id));
+    for (const u of orphanUsageLogs) bgDelete('usage_logs', u.id, authUser?.id, queueEntryIdFor(newQueue, 'usage_logs', u.id));
   },
 
   // ── Inventory ────────────────────────────────────────────────────────────────
@@ -711,6 +828,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const finalInventory = [newItem, ...inventory];
     let newQueue = addToQueue(syncQueue, 'insert', 'inventory', newItem);
     let finalExpenses = expenses;
+    let pairedExpense: Expense | null = null;
 
     if (activeCropId) {
       const totalCost = newItem.price; // price field now stores total purchase price
@@ -722,12 +840,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
       finalExpenses = [newExpense, ...expenses];
       newQueue = addToQueue(newQueue, 'insert', 'expenses', newExpense);
-      bgUpsert('expenses', newExpense, authUser?.id);
+      pairedExpense = newExpense;
     }
 
     set({ inventory: finalInventory, expenses: finalExpenses, syncQueue: newQueue });
     saveLocal(get());
-    bgUpsert('inventory', newItem, authUser?.id);
+    bgUpsert('inventory', newItem, authUser?.id, queueEntryIdFor(newQueue, 'inventory', newItem.id));
+    if (pairedExpense) bgUpsert('expenses', pairedExpense, authUser?.id, queueEntryIdFor(newQueue, 'expenses', pairedExpense.id));
   },
 
   updateInventory: (id, updates) => {
@@ -749,6 +868,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // addInventory) in sync when price or purchased_qty changed — otherwise
     // every report's cost figures drift permanently after an edit.
     let updatedExpenses = expenses;
+    let refreshedExpense: Expense | null = null;
     const priceChanged = existing && updatedItem && updatedItem.price !== existing.price;
     const qtyChanged = existing && updatedItem && updatedItem.purchased_qty !== existing.purchased_qty;
     if (existing && updatedItem && (priceChanged || qtyChanged)) {
@@ -760,20 +880,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         )
       );
       if (pairedExpense) {
-        const refreshedExpense = {
+        refreshedExpense = {
           ...pairedExpense,
           amount: updatedItem.price,
           notes: `Purchased ${updatedItem.purchased_qty} ${updatedItem.unit} of ${updatedItem.name} (${updatedItem.brand})`,
         };
-        updatedExpenses = expenses.map(e => e.id === pairedExpense.id ? refreshedExpense : e);
+        updatedExpenses = expenses.map(e => e.id === pairedExpense.id ? refreshedExpense! : e);
         newQueue = addToQueue(newQueue, 'update', 'expenses', refreshedExpense);
-        bgUpsert('expenses', refreshedExpense, authUser?.id);
       }
     }
 
     set({ inventory: updated, expenses: updatedExpenses, syncQueue: newQueue });
     saveLocal(get());
-    if (updatedItem) bgUpsert('inventory', updatedItem, authUser?.id);
+    if (updatedItem) bgUpsert('inventory', updatedItem, authUser?.id, queueEntryIdFor(newQueue, 'inventory', updatedItem.id));
+    if (refreshedExpense) bgUpsert('expenses', refreshedExpense, authUser?.id, queueEntryIdFor(newQueue, 'expenses', refreshedExpense.id));
   },
 
   deleteInventory: (id) => {
@@ -783,17 +903,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     // this inventory item — otherwise the logs keep a dangling inventory_id
     // that the UI can't resolve and Supabase FK constraints would reject.
     const affectedLogs = usageLogs.filter(l => l.inventory_id === id);
+    const cleanedLogs = affectedLogs.map(l => ({ ...l, inventory_id: null }));
     const updatedLogs = usageLogs.map(l =>
       l.inventory_id === id ? { ...l, inventory_id: null } : l
     );
-    for (const log of affectedLogs) {
-      const cleaned = { ...log, inventory_id: null };
+    for (const cleaned of cleanedLogs) {
       newQueue = addToQueue(newQueue, 'update', 'usage_logs', cleaned);
-      bgUpsert('usage_logs', cleaned, authUser?.id);
     }
     set({ inventory: inventory.filter(i => i.id !== id), usageLogs: updatedLogs, syncQueue: newQueue });
     saveLocal(get());
-    bgDelete('inventory', id, authUser?.id);
+    bgDelete('inventory', id, authUser?.id, queueEntryIdFor(newQueue, 'inventory', id));
+    for (const cleaned of cleanedLogs) bgUpsert('usage_logs', cleaned, authUser?.id, queueEntryIdFor(newQueue, 'usage_logs', cleaned.id));
   },
 
   // ── Usage Logs ───────────────────────────────────────────────────────────────
@@ -822,15 +942,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newLog: UsageLog = { ...logData, id: newId('use'), tenant_id: 'tenant-1', cost: calculatedCost, product_name: inventoryItemName, created_at: new Date().toISOString() };
     let newQueue = addToQueue(syncQueue, 'insert', 'usage_logs', newLog);
 
+    let deductedItem: InventoryItem | undefined;
     if (logData.inventory_id) {
-      const updatedItem = updatedInventory.find(i => i.id === logData.inventory_id);
-      newQueue = addToQueue(newQueue, 'update', 'inventory', updatedItem);
-      if (updatedItem) bgUpsert('inventory', updatedItem, authUser?.id);
+      deductedItem = updatedInventory.find(i => i.id === logData.inventory_id);
+      newQueue = addToQueue(newQueue, 'update', 'inventory', deductedItem);
     }
 
     set({ usageLogs: [newLog, ...usageLogs], inventory: updatedInventory, syncQueue: newQueue });
     saveLocal(get());
-    bgUpsert('usage_logs', newLog, authUser?.id);
+    bgUpsert('usage_logs', newLog, authUser?.id, queueEntryIdFor(newQueue, 'usage_logs', newLog.id));
+    if (deductedItem) bgUpsert('inventory', deductedItem, authUser?.id, queueEntryIdFor(newQueue, 'inventory', deductedItem.id));
   },
 
   deleteUsageLog: (id) => {
@@ -840,21 +961,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     let updatedInventory = inventory;
     let newQueue = syncQueue;
 
+    let refunded: InventoryItem | undefined;
     if (log.inventory_id) {
       updatedInventory = inventory.map(i =>
         i.id === log.inventory_id
           ? { ...i, remaining_qty: parseFloat((i.remaining_qty + log.quantity_used).toFixed(2)) }
           : i
       );
-      const refunded = updatedInventory.find(i => i.id === log.inventory_id);
+      refunded = updatedInventory.find(i => i.id === log.inventory_id);
       newQueue = addToQueue(newQueue, 'update', 'inventory', refunded);
-      if (refunded) bgUpsert('inventory', refunded, authUser?.id);
     }
 
     newQueue = addToQueue(newQueue, 'delete', 'usage_logs', { id });
     set({ usageLogs: usageLogs.filter(l => l.id !== id), inventory: updatedInventory, syncQueue: newQueue });
     saveLocal(get());
-    bgDelete('usage_logs', id, authUser?.id);
+    bgDelete('usage_logs', id, authUser?.id, queueEntryIdFor(newQueue, 'usage_logs', id));
+    if (refunded) bgUpsert('inventory', refunded, authUser?.id, queueEntryIdFor(newQueue, 'inventory', refunded.id));
   },
 
   // ── Harvest ──────────────────────────────────────────────────────────────────
@@ -865,7 +987,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newQueue = addToQueue(syncQueue, 'insert', 'harvests', newHarvest);
     set({ harvests: [newHarvest, ...harvests], syncQueue: newQueue });
     saveLocal(get());
-    bgUpsert('harvests', newHarvest, authUser?.id);
+    bgUpsert('harvests', newHarvest, authUser?.id, queueEntryIdFor(newQueue, 'harvests', newHarvest.id));
   },
 
   deleteHarvest: (id) => {
@@ -873,7 +995,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newQueue = addToQueue(syncQueue, 'delete', 'harvests', { id });
     set({ harvests: harvests.filter(h => h.id !== id), syncQueue: newQueue });
     saveLocal(get());
-    bgDelete('harvests', id, authUser?.id);
+    bgDelete('harvests', id, authUser?.id, queueEntryIdFor(newQueue, 'harvests', id));
   },
 
   // ── Expenses ─────────────────────────────────────────────────────────────────
@@ -883,7 +1005,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newQueue = addToQueue(syncQueue, 'insert', 'expenses', newExpense);
     set({ expenses: [newExpense, ...expenses], syncQueue: newQueue });
     saveLocal(get());
-    bgUpsert('expenses', newExpense, authUser?.id);
+    bgUpsert('expenses', newExpense, authUser?.id, queueEntryIdFor(newQueue, 'expenses', newExpense.id));
   },
 
   updateExpense: (id, updates) => {
@@ -895,7 +1017,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newQueue = addToQueue(syncQueue, 'update', 'expenses', updatedItem);
     set({ expenses: updated, syncQueue: newQueue });
     saveLocal(get());
-    if (updatedItem) bgUpsert('expenses', updatedItem, authUser?.id);
+    if (updatedItem) bgUpsert('expenses', updatedItem, authUser?.id, queueEntryIdFor(newQueue, 'expenses', updatedItem.id));
   },
 
   deleteExpense: (id) => {
@@ -903,7 +1025,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newQueue = addToQueue(syncQueue, 'delete', 'expenses', { id });
     set({ expenses: expenses.filter(e => e.id !== id), syncQueue: newQueue });
     saveLocal(get());
-    bgDelete('expenses', id, authUser?.id);
+    bgDelete('expenses', id, authUser?.id, queueEntryIdFor(newQueue, 'expenses', id));
   },
 
   // ── Weather ──────────────────────────────────────────────────────────────────
@@ -927,7 +1049,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newQueue = addToQueue(syncQueue, actionType, 'weather_logs', newLog);
     set({ weatherLogs: updatedLogs, syncQueue: newQueue });
     saveLocal(get());
-    bgUpsert('weather_logs', newLog, authUser?.id);
+    bgUpsert('weather_logs', newLog, authUser?.id, queueEntryIdFor(newQueue, 'weather_logs', newLog.id));
   },
 
   deleteWeatherLog: (id) => {
@@ -936,7 +1058,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newQueue = addToQueue(syncQueue, 'delete', 'weather_logs', { id });
     set({ weatherLogs: updated, syncQueue: newQueue });
     saveLocal(get());
-    bgDelete('weather_logs', id, authUser?.id);
+    bgDelete('weather_logs', id, authUser?.id, queueEntryIdFor(newQueue, 'weather_logs', id));
   },
 
   // ── Settings ─────────────────────────────────────────────────────────────────
@@ -944,8 +1066,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Settings are intentionally local-only (no Supabase `settings` table).
     // farmProfile / widgetOrder / module toggles persist via localStorage and
     // are NOT queued for sync — that means they don't roam across devices, but
-    // it avoids polluting syncQueue with entries that pushAllLocalToSupabase
-    // has no table to write to.
+    // it avoids polluting syncQueue with entries the drain/pull path has no
+    // table to write to.
     const { settings } = get();
     const finalSettings = { ...settings, ...updates };
     set({ settings: finalSettings });
@@ -976,6 +1098,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newQueue = addToQueue(syncQueue, 'update', 'crops', updatedCrop);
     set({ crops: updated, syncQueue: newQueue });
     saveLocal(get());
-    if (updatedCrop) bgUpsert('crops', updatedCrop, authUser?.id);
+    if (updatedCrop) bgUpsert('crops', updatedCrop, authUser?.id, queueEntryIdFor(newQueue, 'crops', updatedCrop.id));
   },
 }));
