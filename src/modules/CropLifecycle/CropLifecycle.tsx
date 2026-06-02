@@ -82,7 +82,7 @@ export const CropLifecycle: React.FC = () => {
     }
   };
 
-  const triggerStartCrop = () => {
+  const triggerStartCrop = (confirmReplace = false) => {
     startCrop({
       name: formData.name,
       variety: formData.variety,
@@ -94,7 +94,8 @@ export const CropLifecycle: React.FC = () => {
       num_plants: Number(formData.num_plants),
       seed_nursery_cost: Number(formData.seed_nursery_cost),
       target_yield_kg: Number(formData.target_yield_kg),
-      notes: formData.notes
+      notes: formData.notes,
+      confirmReplace,
     });
     setIsSubmitConfirm(false);
     setFormData({
@@ -209,7 +210,7 @@ export const CropLifecycle: React.FC = () => {
                   <span className="font-bold block">⚠️ ARCHIVING ACTIVE CROP DETECTED</span>
                   <p>Starting a new crop cycle will automatically mark your current active crop cycle as **archived** and set its end date to today. This ensures you maintain **one active crop** in play.</p>
                   <div className="flex gap-2">
-                    <button type="button" onClick={triggerStartCrop} className="px-3 py-1.5 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600">Yes, archive & start new</button>
+                    <button type="button" onClick={() => triggerStartCrop(true)} className="px-3 py-1.5 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600">Yes, archive & start new</button>
                     <button type="button" onClick={() => setIsSubmitConfirm(false)} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-lg">Cancel</button>
                   </div>
                 </div>

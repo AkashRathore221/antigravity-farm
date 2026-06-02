@@ -198,7 +198,9 @@ export async function upsertRow(table: string, obj: AnyRecord): Promise<void> {
 export async function deleteRow(table: string, id: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error(`[Sync] No active session — cannot delete from ${table}`);
-  const { error } = await supabase.from(table).delete().eq('id', id);
+  // Scope the delete to BOTH id and user_id — defense-in-depth so a single RLS
+  // policy gap can never let one user delete another user's row by id.
+  const { error } = await supabase.from(table).delete().eq('id', id).eq('user_id', user.id);
   if (error) {
     logSupabaseError('delete', table, error, { id });
     throw error;

@@ -46,7 +46,7 @@ interface AppState {
   importBackup: (backupStr: string) => boolean;
 
   // Crop Lifecycle
-  startCrop: (cropData: Omit<Crop, 'id' | 'tenant_id' | 'status' | 'created_at'>) => void;
+  startCrop: (cropData: Omit<Crop, 'id' | 'tenant_id' | 'status' | 'created_at'> & { confirmReplace?: boolean }) => void;
   endCrop: (id: string) => void;
   deleteCrop: (id: string) => void;
 
@@ -392,23 +392,31 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Auth ──────────────────────────────────────────────────────────────────────
   checkSession: async () => {
     set({ authLoading: true });
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) {
-      const newUserId = session.user.id;
-      const storedUserId = localStorage.getItem(USER_ID_KEY);
-      // If a different user previously used this device, wipe their local data
-      // before this user's session resumes — prevents cross-account data leak.
-      if (storedUserId && storedUserId !== newUserId) {
-        localStorage.removeItem(LS_KEY);
-        set({
-          crops: [], inventory: [], usageLogs: [], harvests: [],
-          expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [],
-        });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const newUserId = session.user.id;
+        const storedUserId = localStorage.getItem(USER_ID_KEY);
+        // If a different user previously used this device, wipe their local data
+        // before this user's session resumes — prevents cross-account data leak.
+        if (storedUserId && storedUserId !== newUserId) {
+          localStorage.removeItem(LS_KEY);
+          set({
+            crops: [], inventory: [], usageLogs: [], harvests: [],
+            expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [],
+          });
+        }
+        localStorage.setItem(USER_ID_KEY, newUserId);
+        set({ authUser: { id: newUserId, email: session.user.email ?? '' } });
+      } else {
+        set({ authUser: null });
       }
-      localStorage.setItem(USER_ID_KEY, newUserId);
-      set({ authUser: { id: newUserId, email: session.user.email ?? '' }, authLoading: false });
-    } else {
-      set({ authUser: null, authLoading: false });
+    } catch (e) {
+      // Network/SDK failure must not strand the app on the loading spinner.
+      console.error('[Auth] checkSession failed:', e);
+    } finally {
+      // ALWAYS clear the loading flag so the UI can render (auth screen or app).
+      set({ authLoading: false });
     }
   },
 
@@ -750,29 +758,25 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // ── Crops ─────────────────────────────────────────────────────────────────────
   startCrop: (cropData) => {
+    const { confirmReplace, ...cropFields } = cropData;
+    const activeExists = get().crops.some(c => c.status === 'active');
+    if (activeExists) {
+      if (!confirmReplace) {
+        // No confirmation given — refuse rather than silently archiving.
+        alert('You already have an active crop. Please end the current crop before starting a new one.');
+        return;
+      }
+      // User confirmed replace: archive the current active crop first (this
+      // queues + syncs its archival), then fall through to create the new one.
+      const active = get().crops.find(c => c.status === 'active');
+      if (active) get().endCrop(active.id);
+    }
     const { crops, syncQueue, authUser } = get();
-    if (crops.some(c => c.status === 'active')) {
-      alert('You already have an active crop. Please end the current crop before starting a new one.');
-      return;
-    }
-    const today = new Date().toISOString().split('T')[0];
-    const previouslyActive = crops.find(c => c.status === 'active');
-    const updatedCrops = crops.map(c =>
-      c.status === 'active' ? { ...c, status: 'archived' as const, end_date: today } : c
-    );
-    const newCrop: Crop = { ...cropData, id: newId('crop'), tenant_id: 'tenant-1', status: 'active', created_at: new Date().toISOString() };
-    const finalCrops = [newCrop, ...updatedCrops];
-    let newQueue = addToQueue(syncQueue, 'insert', 'crops', newCrop);
-    let archivedCrop: Crop | null = null;
-    // Also sync the crop that just got archived so Supabase status is updated.
-    if (previouslyActive) {
-      archivedCrop = { ...previouslyActive, status: 'archived' as const, end_date: today };
-      newQueue = addToQueue(newQueue, 'update', 'crops', archivedCrop);
-    }
-    set({ crops: finalCrops, activeCropId: newCrop.id, syncQueue: newQueue });
+    const newCrop: Crop = { ...cropFields, id: newId('crop'), tenant_id: 'tenant-1', status: 'active', created_at: new Date().toISOString() };
+    const newQueue = addToQueue(syncQueue, 'insert', 'crops', newCrop);
+    set({ crops: [newCrop, ...crops], activeCropId: newCrop.id, syncQueue: newQueue });
     saveLocal(get());
     bgUpsert('crops', newCrop, authUser?.id, queueEntryIdFor(newQueue, 'crops', newCrop.id));
-    if (archivedCrop) bgUpsert('crops', archivedCrop, authUser?.id, queueEntryIdFor(newQueue, 'crops', archivedCrop.id));
   },
 
   endCrop: (id) => {
