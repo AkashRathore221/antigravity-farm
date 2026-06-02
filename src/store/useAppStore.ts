@@ -631,10 +631,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ syncQueue: queue, isSyncing: true });
     saveLocal(get());
+    // Snapshot the entry ids being pushed. After success we clear ONLY these —
+    // entries a concurrent mutation adds during the await must survive.
+    const queueSnapshot = get().syncQueue.map(e => e.id);
     try {
       const ok = await pushAllLocalToSupabase(get());
       if (ok) {
-        set({ syncQueue: [] });
+        set({ syncQueue: get().syncQueue.filter(e => !queueSnapshot.includes(e.id)) });
         saveLocal(get());
       }
       return ok;
@@ -787,7 +790,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const updatedCrops = crops.map(c => c.id === id ? { ...c, status: 'archived' as const, end_date: today } : c);
     const archived = updatedCrops.find(c => c.id === id);
     const newQueue = addToQueue(syncQueue, 'update', 'crops', archived);
-    set({ crops: updatedCrops, activeCropId: null, syncQueue: newQueue });
+    // Only clear activeCropId when the crop being ended is the active one —
+    // ending some other (defensive) id must not wipe the real active pointer.
+    const wasActive = get().activeCropId === id;
+    set({ crops: updatedCrops, syncQueue: newQueue, ...(wasActive ? { activeCropId: null } : {}) });
     saveLocal(get());
     if (archived) bgUpsert('crops', archived, authUser?.id, queueEntryIdFor(newQueue, 'crops', archived.id));
   },
@@ -1044,7 +1050,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newLog: WeatherLog = {
       ...weatherData,
       id: existingIndex >= 0 ? weatherLogs[existingIndex].id : newId('we'),
-      tenant_id: 'tenant-1', vpd: calculatedVpd, created_at: new Date().toISOString(),
+      tenant_id: 'tenant-1', vpd: calculatedVpd,
+      // Preserve the original created_at when updating an existing date's log so
+      // its sort position / merge timestamp doesn't jump on every edit.
+      created_at: existingIndex >= 0 ? weatherLogs[existingIndex].created_at : new Date().toISOString(),
     };
 
     if (existingIndex >= 0) { updatedLogs[existingIndex] = newLog; actionType = 'update'; }

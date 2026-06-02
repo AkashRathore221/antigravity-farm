@@ -14,7 +14,7 @@ const GoogleIcon = () => (
 
 export const Auth: React.FC = () => {
   const { signIn, signUp } = useAppStore();
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [mode, setMode] = useState<'signin' | 'signup' | 'reset'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -22,6 +22,33 @@ export const Auth: React.FC = () => {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  // Signup confirmation gate: keep the user on a dedicated "check your email"
+  // banner after signup instead of silently flipping to the sign-in tab.
+  const [signupComplete, setSignupComplete] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+
+  const goToMode = (m: 'signin' | 'signup' | 'reset') => {
+    setMode(m);
+    setError(null);
+    setInfo(null);
+    setSignupComplete(false);
+    setResetSent(false);
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+    setLoading(false);
+    if (resetError) {
+      setError(resetError.message);
+    } else {
+      setResetSent(true);
+    }
+  };
 
   const handleGoogle = async () => {
     setError(null);
@@ -54,8 +81,9 @@ export const Auth: React.FC = () => {
       if (err) {
         setError(err);
       } else {
-        setInfo('Account created! Check your email to confirm, then sign in.');
-        setMode('signin');
+        // Keep the user here with a dedicated confirmation banner — don't
+        // silently flip to sign-in where the message is easy to miss.
+        setSignupComplete(true);
       }
     }
     setLoading(false);
@@ -78,21 +106,23 @@ export const Auth: React.FC = () => {
 
         {/* Card */}
         <div className="glass-premium rounded-2xl p-6 border border-slate-700/40 shadow-2xl space-y-5">
-          {/* Tab toggle */}
-          <div className="flex rounded-xl overflow-hidden border border-slate-700/40 text-xs font-bold">
-            <button
-              onClick={() => { setMode('signin'); setError(null); setInfo(null); }}
-              className={`flex-1 py-2.5 transition-all ${mode === 'signin' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => { setMode('signup'); setError(null); setInfo(null); }}
-              className={`flex-1 py-2.5 transition-all ${mode === 'signup' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              Create Account
-            </button>
-          </div>
+          {/* Tab toggle — hidden during the reset flow and the post-signup banner */}
+          {!signupComplete && mode !== 'reset' && (
+            <div className="flex rounded-xl overflow-hidden border border-slate-700/40 text-xs font-bold">
+              <button
+                onClick={() => goToMode('signin')}
+                className={`flex-1 py-2.5 transition-all ${mode === 'signin' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => goToMode('signup')}
+                className={`flex-1 py-2.5 transition-all ${mode === 'signup' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                Create Account
+              </button>
+            </div>
+          )}
 
           {/* Error / Info */}
           {error && (
@@ -106,6 +136,67 @@ export const Auth: React.FC = () => {
             </div>
           )}
 
+          {signupComplete ? (
+            /* ── Post-signup confirmation (FIX AUTH-1) ── */
+            <div className="space-y-4">
+              <div className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-4 leading-relaxed flex items-start gap-2">
+                <Mail size={16} className="shrink-0 mt-0.5" />
+                <span>Account created! Please check your email and click the confirmation link before signing in.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => goToMode('signin')}
+                className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
+              >
+                <LogIn size={14} /> Back to sign in
+              </button>
+            </div>
+          ) : mode === 'reset' ? (
+            /* ── Forgot-password flow (FIX AUTH-2) ── */
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <p className="text-[11px] text-slate-400 font-semibold leading-relaxed">
+                Enter your account email and we'll send you a link to reset your password.
+              </p>
+              {resetSent ? (
+                <div className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5">
+                  Password reset email sent — check your inbox.
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Email Address</label>
+                  <div className="relative">
+                    <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="email"
+                      required
+                      autoComplete="email"
+                      placeholder="farmer@antigravity.farm"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      className="w-full bg-slate-900/60 border border-slate-700/40 rounded-xl pl-9 pr-3 py-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                    />
+                  </div>
+                </div>
+              )}
+              {!resetSent && (
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
+                >
+                  {loading ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : 'Send reset link'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => goToMode('signin')}
+                className="w-full text-[11px] font-bold text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                ← Back to sign in
+              </button>
+            </form>
+          ) : (
+          <>
           {/* Google OAuth */}
           <button
             type="button"
@@ -169,6 +260,15 @@ export const Auth: React.FC = () => {
                   {showPass ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
+              {mode === 'signin' && (
+                <button
+                  type="button"
+                  onClick={() => goToMode('reset')}
+                  className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors block ml-auto pt-0.5"
+                >
+                  Forgot password?
+                </button>
+              )}
             </div>
 
             <button
@@ -185,6 +285,8 @@ export const Auth: React.FC = () => {
               )}
             </button>
           </form>
+          </>
+          )}
         </div>
 
         <p className="text-center text-[10px] text-slate-600 font-semibold">
