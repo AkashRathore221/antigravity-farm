@@ -173,6 +173,54 @@ function normalizeActiveCrops(crops: Crop[]): Crop[] {
   );
 }
 
+// One-time data-repair: re-point orphaned children at the active crop.
+// A harvest / expense / usage_log can end up with a crop_id that matches no
+// existing crop — e.g. it was created against a temporary or mock crop id
+// before the real Supabase crop id was assigned. Such rows silently vanish
+// from every per-crop view. Reassign each orphan to the current active crop.
+// Returns the corrected arrays plus the records that were changed so the
+// caller can persist them locally and queue them for sync.
+function reassignOrphanedChildren(s: {
+  crops: Crop[]; harvests: Harvest[]; expenses: Expense[]; usageLogs: UsageLog[];
+}): {
+  harvests: Harvest[]; expenses: Expense[]; usageLogs: UsageLog[];
+  changed: { harvests: Harvest[]; expenses: Expense[]; usageLogs: UsageLog[] };
+} {
+  const empty = { harvests: [] as Harvest[], expenses: [] as Expense[], usageLogs: [] as UsageLog[] };
+  const activeCrop = s.crops.find(c => c.status === 'active');
+  if (!activeCrop) {
+    return { harvests: s.harvests, expenses: s.expenses, usageLogs: s.usageLogs, changed: empty };
+  }
+  const validIds = new Set(s.crops.map(c => c.id));
+  const changedHarvests: Harvest[] = [];
+  const changedExpenses: Expense[] = [];
+  const changedUsageLogs: UsageLog[] = [];
+
+  const harvests = s.harvests.map(h => {
+    if (validIds.has(h.crop_id)) return h;
+    const fixed = { ...h, crop_id: activeCrop.id };
+    changedHarvests.push(fixed);
+    return fixed;
+  });
+  const expenses = s.expenses.map(e => {
+    if (validIds.has(e.crop_id)) return e;
+    const fixed = { ...e, crop_id: activeCrop.id };
+    changedExpenses.push(fixed);
+    return fixed;
+  });
+  const usageLogs = s.usageLogs.map(u => {
+    if (validIds.has(u.crop_id)) return u;
+    const fixed = { ...u, crop_id: activeCrop.id };
+    changedUsageLogs.push(fixed);
+    return fixed;
+  });
+
+  return {
+    harvests, expenses, usageLogs,
+    changed: { harvests: changedHarvests, expenses: changedExpenses, usageLogs: changedUsageLogs },
+  };
+}
+
 // Recovery path: push all local records to Supabase when bgUpsert previously failed silently.
 // Returns true only if every upsert AND delete succeeded — caller should only clear syncQueue on true.
 // Tables are processed in FK dependency order (crops/inventory first, then referencing tables)
@@ -394,6 +442,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         saveLocal(get());
       }
       // Both empty: new user or mock-only state — leave local untouched.
+
+      // Repair orphaned children whose crop_id no longer matches a real crop
+      // (data drift from temporary/mock crop ids). Reassign to the active
+      // crop, persist locally, and queue + push the fixes so the cloud is
+      // corrected too — otherwise the next pull would re-introduce the drift.
+      const cur = get();
+      const repaired = reassignOrphanedChildren(cur);
+      const changedCount =
+        repaired.changed.harvests.length +
+        repaired.changed.expenses.length +
+        repaired.changed.usageLogs.length;
+      if (changedCount > 0) {
+        let q = cur.syncQueue;
+        for (const h of repaired.changed.harvests) { q = addToQueue(q, 'update', 'harvests', h); bgUpsert('harvests', h, authUser.id); }
+        for (const e of repaired.changed.expenses) { q = addToQueue(q, 'update', 'expenses', e); bgUpsert('expenses', e, authUser.id); }
+        for (const u of repaired.changed.usageLogs) { q = addToQueue(q, 'update', 'usage_logs', u); bgUpsert('usage_logs', u, authUser.id); }
+        set({ harvests: repaired.harvests, expenses: repaired.expenses, usageLogs: repaired.usageLogs, syncQueue: q });
+        saveLocal(get());
+        console.warn(`[Migration] Reassigned ${changedCount} orphaned record(s) to active crop ${cur.crops.find(c => c.status === 'active')?.id}`);
+      }
     } catch (err) {
       console.error('[Sync] pullFromSupabase threw:', err);
     } finally {
