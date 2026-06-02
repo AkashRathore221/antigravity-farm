@@ -79,10 +79,15 @@ export const Harvest: React.FC = () => {
 
   // Calculations for Active Crop
   const cropHarvests = activeCrop ? harvests.filter(h => h.crop_id === activeCrop.id) : [];
+  // Gross harvested volume (incl. wastage) — kept for record-keeping display only.
   const totalProduction = cropHarvests.reduce((sum, h) => sum + Number(h.weight_total), 0);
+  // Marketable yield (Grade A + B + C, excludes wastage) — the basis for all
+  // KPIs: avg sale rate, cost/kg, and yield-vs-target progress.
+  const marketableProduction = cropHarvests.reduce(
+    (sum, h) => sum + Number(h.weight_grade_a) + Number(h.weight_grade_b) + Number(h.weight_grade_c), 0);
   const totalRevenue = cropHarvests.reduce((sum, h) => sum + Number(h.revenue), 0);
-  const avgSaleRate = totalProduction > 0 ? totalRevenue / totalProduction : 0;
-  
+  const avgSaleRate = marketableProduction > 0 ? totalRevenue / marketableProduction : 0;
+
   // Grade distribution splits
   const totalGradeA = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_a), 0);
   const totalGradeB = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_b), 0);
@@ -98,7 +103,7 @@ export const Harvest: React.FC = () => {
   const cropUsages = activeCrop ? usageLogs.filter(u => u.crop_id === activeCrop.id) : [];
   const totalExp = cropExpenses.reduce((sum, e) => sum + Number(e.amount), 0) + 
                    cropUsages.reduce((sum, u) => sum + Number(u.cost), 0);
-  const costPerKg = totalProduction > 0 ? totalExp / totalProduction : 0;
+  const costPerKg = marketableProduction > 0 ? totalExp / marketableProduction : 0;
 
   // Filter list
   const filteredHarvests = harvests.filter(h => {
@@ -180,17 +185,17 @@ export const Harvest: React.FC = () => {
           <div className="flex justify-between items-center text-xs font-semibold">
             <span className="text-emerald-700 dark:text-emerald-300 font-bold">Yield Target Progress</span>
             <span className="text-emerald-600 dark:text-emerald-400">
-              {totalProduction.toLocaleString()} kg harvested &bull; {((activeCrop.target_yield_kg ?? 0) - totalProduction).toLocaleString()} kg remaining
+              {marketableProduction.toLocaleString()} kg harvested &bull; {((activeCrop.target_yield_kg ?? 0) - marketableProduction).toLocaleString()} kg remaining
             </span>
           </div>
           <div className="w-full h-4 bg-emerald-100 dark:bg-emerald-950/50 rounded-full overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all rounded-full flex items-center justify-end pr-2"
-              style={{ width: `${Math.min(100, (totalProduction / (activeCrop.target_yield_kg ?? 1)) * 100)}%` }}
+              style={{ width: `${Math.min(100, (marketableProduction / (activeCrop.target_yield_kg ?? 1)) * 100)}%` }}
             />
           </div>
           <div className="flex justify-between text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
-            <span>{Math.min(100, (totalProduction / (activeCrop.target_yield_kg ?? 1)) * 100).toFixed(1)}% of target</span>
+            <span>{Math.min(100, (marketableProduction / (activeCrop.target_yield_kg ?? 1)) * 100).toFixed(1)}% of target</span>
             <span>Target: {(activeCrop.target_yield_kg ?? 0).toLocaleString()} kg</span>
           </div>
         </div>

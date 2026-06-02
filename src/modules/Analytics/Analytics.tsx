@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import {
-  ResponsiveContainer, AreaChart, Area, BarChart, Bar,
+  ResponsiveContainer, AreaChart, Area, BarChart, Bar, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, ReferenceLine
 } from 'recharts';
 import { BarChart3 } from 'lucide-react';
@@ -64,7 +64,9 @@ export const Analytics: React.FC = () => {
       dataMap[key].expense += exp;
     };
 
-    cropHarvests.forEach(h => addToMap(h.date, Number(h.weight_total), Number(h.revenue), 0));
+    // Yield series uses marketable weight (Grade A+B+C, excludes wastage) so it
+    // matches the cost/kg and yield KPIs elsewhere in the app.
+    cropHarvests.forEach(h => addToMap(h.date, Number(h.weight_grade_a) + Number(h.weight_grade_b) + Number(h.weight_grade_c), Number(h.revenue), 0));
     cropExpenses.forEach(e => addToMap(e.date, 0, 0, Number(e.amount)));
     cropUsages.forEach(u => addToMap(u.date, 0, 0, Number(u.cost)));
     if (activeCrop && (activeCrop.seed_nursery_cost ?? 0) > 0) {
@@ -391,6 +393,8 @@ export const Analytics: React.FC = () => {
                   <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" label={{ value: 'Break-Even', fill: '#94a3b8', fontSize: 9 }} />
                   <Area name="Cumulative Revenue (₹)" type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#cumRev)" />
                   <Area name="Cumulative Expenses (₹)" type="monotone" dataKey="expenses" stroke="#f43f5e" strokeWidth={2} fill="url(#cumExp)" />
+                  {/* Net P&L line — crosses the y=0 Break-Even line exactly when the crop turns profitable. */}
+                  <Line name="Net P&L (₹)" type="monotone" dataKey="net" stroke="#eab308" strokeWidth={2} strokeDasharray="5 5" dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

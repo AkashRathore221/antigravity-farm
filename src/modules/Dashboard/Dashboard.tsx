@@ -43,9 +43,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
       daysSinceTransplant = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     }
 
-    // Active harvests
+    // Active harvests. totalProduction is gross (incl. wastage) for display;
+    // marketableProduction (Grade A+B+C) is the basis for cost/kg.
     const cropHarvests = harvests.filter(h => h.crop_id === activeCrop.id);
     totalProduction = cropHarvests.reduce((sum, h) => sum + Number(h.weight_total), 0);
+    const marketableProduction = cropHarvests.reduce(
+      (sum, h) => sum + Number(h.weight_grade_a) + Number(h.weight_grade_b) + Number(h.weight_grade_c), 0);
     totalRevenue = cropHarvests.reduce((sum, h) => sum + Number(h.revenue), 0);
 
     // Active general expenses (Labour, Transport, Packaging, Misc)
@@ -63,8 +66,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
     if (totalExpenses > 0) {
       roi = parseFloat(((netProfit / totalExpenses) * 100).toFixed(1));
     }
-    if (totalProduction > 0) {
-      costPerKg = parseFloat((totalExpenses / totalProduction).toFixed(2));
+    if (marketableProduction > 0) {
+      costPerKg = parseFloat((totalExpenses / marketableProduction).toFixed(2));
     }
     if (activeCrop.num_plants > 0) {
       costPerPlant = parseFloat((totalExpenses / activeCrop.num_plants).toFixed(2));
@@ -177,12 +180,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
     const ce = expenses.filter(e => e.crop_id === lastArchivedCrop.id);
     const cu = usageLogs.filter(u => u.crop_id === lastArchivedCrop.id);
     const yld = ch.reduce((s, h) => s + Number(h.weight_total), 0);
+    const marketable = ch.reduce((s, h) => s + Number(h.weight_grade_a) + Number(h.weight_grade_b) + Number(h.weight_grade_c), 0);
     const rev = ch.reduce((s, h) => s + Number(h.revenue), 0);
     const exp = ce.reduce((s, e) => s + Number(e.amount), 0) + cu.reduce((s, u) => s + Number(u.cost), 0) + (lastArchivedCrop.seed_nursery_cost ?? 0);
     const start = new Date(lastArchivedCrop.start_date);
     const end = lastArchivedCrop.end_date ? new Date(lastArchivedCrop.end_date) : new Date();
     const dur = Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    return { yield: yld, revenue: rev, expenses: exp, profit: rev - exp, costKg: yld > 0 ? exp / yld : 0, duration: dur };
+    return { yield: yld, revenue: rev, expenses: exp, profit: rev - exp, costKg: marketable > 0 ? exp / marketable : 0, duration: dur };
   })() : null;
 
   // Widget Reordering logic
