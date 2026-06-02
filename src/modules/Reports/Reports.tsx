@@ -75,6 +75,36 @@ export const Reports: React.FC = () => {
     ? cropWeatherLogs.reduce((sum, l) => sum + (l.vpd || 0), 0) / cropWeatherLogs.length 
     : 0;
 
+  // iOS Safari often opens <a download> in a new tab instead of saving. When
+  // the Web Share API can share files (iOS), route through it so the file lands
+  // in the Files app / a share sheet; otherwise fall back to anchor download.
+  const isIOS = () =>
+    typeof navigator !== 'undefined' &&
+    (/iP(hone|ad|od)/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+  const saveFile = async (content: string, fileName: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const file = new File([blob], fileName, { type: mimeType });
+    if (isIOS() && typeof navigator.share === 'function' &&
+        (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+      try {
+        await navigator.share({ files: [file], title: fileName });
+        return;
+      } catch {
+        // User cancelled or share failed — fall through to anchor download.
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // Standard CSV Exporter
   const downloadCSV = (headers: string[], rows: any[][], fileName: string) => {
     // Prevent CSV formula injection: prefix any cell starting with =, +, -,
@@ -96,15 +126,8 @@ export const Reports: React.FC = () => {
         return sanitize(String(val));
       }).join(','))
     ].join('\n');
-    
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+
+    void saveFile(csvContent, fileName, 'text/csv;charset=utf-8;');
   };
 
   // Trigger Excel CSV exports
@@ -163,19 +186,13 @@ export const Reports: React.FC = () => {
       crops, inventory, usageLogs, harvests, expenses, weatherLogs, settings,
     };
     const jsonStr = JSON.stringify(state, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `polyhouse_backup_${new Date().toISOString().split('T')[0]}.json`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    void saveFile(jsonStr, `polyhouse_backup_${new Date().toISOString().split('T')[0]}.json`, 'application/json');
   };
 
-  const handleImport = () => {
-    if (!importText.trim()) return;
-    const success = importBackup(importText);
+  // Restore from a JSON string (shared by the file picker and the paste box).
+  const runImport = (raw: string) => {
+    if (!raw.trim()) return;
+    const success = importBackup(raw);
     if (success) {
       setImportStatus({ type: 'success', message: 'Database backup imported successfully! Page will re-render.' });
       setImportText('');
@@ -183,6 +200,19 @@ export const Reports: React.FC = () => {
     } else {
       setImportStatus({ type: 'error', message: 'Failed to import backup. Please ensure JSON format is correct.' });
     }
+  };
+
+  const handleImport = () => runImport(importText);
+
+  // File-picker import — usable on mobile where pasting a large blob is painful.
+  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => runImport(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => setImportStatus({ type: 'error', message: 'Could not read the selected file.' });
+    reader.readAsText(file);
+    e.target.value = ''; // allow re-selecting the same file
   };
 
   const handlePrint = () => {
@@ -298,6 +328,20 @@ export const Reports: React.FC = () => {
             <Upload size={16} className="text-emerald-500" />
             <span>Restore Backup Snapshot</span>
           </h4>
+
+          {/* File picker — primary path, works well on mobile */}
+          <label className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold rounded-xl text-xs cursor-pointer transition-all">
+            <Upload size={14} />
+            <span>Choose backup file</span>
+            <input type="file" accept=".json,application/json" onChange={handleFileImport} className="hidden" />
+          </label>
+
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">or paste JSON manually</span>
+            <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+          </div>
+
           <textarea
             value={importText}
             onChange={(e) => setImportText(e.target.value)}

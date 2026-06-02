@@ -213,17 +213,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
 
     const widgetControls = (
       <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 shadow-sm no-print">
-        <button 
-          onClick={() => moveWidget(index, 'up')} 
+        <button
+          onClick={() => moveWidget(index, 'up')}
           disabled={index === 0}
-          className="p-1 text-slate-500 hover:text-emerald-500 disabled:opacity-30 rounded hover:bg-slate-200 dark:hover:bg-slate-700"
+          className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-500 hover:text-emerald-500 disabled:opacity-30 rounded hover:bg-slate-200 dark:hover:bg-slate-700"
         >
           <ChevronUp size={14} />
         </button>
-        <button 
-          onClick={() => moveWidget(index, 'down')} 
+        <button
+          onClick={() => moveWidget(index, 'down')}
           disabled={index === settings.widgetsOrder.length - 1}
-          className="p-1 text-slate-500 hover:text-emerald-500 disabled:opacity-30 rounded hover:bg-slate-200 dark:hover:bg-slate-700"
+          className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-500 hover:text-emerald-500 disabled:opacity-30 rounded hover:bg-slate-200 dark:hover:bg-slate-700"
         >
           <ChevronDown size={14} />
         </button>

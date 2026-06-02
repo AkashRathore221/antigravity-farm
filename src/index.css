@@ -20,6 +20,14 @@ body {
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
 }
 
+/* Prevent iOS Safari from auto-zooming when focusing a form control —
+   it only zooms when the control's font-size is below 16px. */
+@media (max-width: 640px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
 /* Modern responsive scrollbars */
 ::-webkit-scrollbar {
   width: 6px;

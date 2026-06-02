@@ -221,7 +221,7 @@ export const Analytics: React.FC = () => {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" className="dark:hidden" />
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" className="hidden dark:block" />
-                <XAxis dataKey="date" stroke="#94a3b8" />
+                <XAxis dataKey="date" stroke="#94a3b8" interval="preserveStartEnd" tick={{ fontSize: 10 }} minTickGap={30} />
                 <YAxis stroke="#94a3b8" />
                 <Tooltip content={<CustomChartTooltip />} />
                 <Legend iconType="circle" />
@@ -311,7 +311,7 @@ export const Analytics: React.FC = () => {
                 <BarChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" className="dark:hidden" />
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" className="hidden dark:block" />
-                  <XAxis dataKey="date" stroke="#94a3b8" />
+                  <XAxis dataKey="date" stroke="#94a3b8" interval="preserveStartEnd" tick={{ fontSize: 10 }} minTickGap={30} />
                   <YAxis stroke="#94a3b8" />
                   <Tooltip content={<CustomChartTooltip />} />
                   <Legend iconType="circle" />
@@ -386,7 +386,7 @@ export const Analytics: React.FC = () => {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" className="dark:hidden" />
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" className="hidden dark:block" />
-                  <XAxis dataKey="date" stroke="#94a3b8" />
+                  <XAxis dataKey="date" stroke="#94a3b8" interval="preserveStartEnd" tick={{ fontSize: 10 }} minTickGap={30} />
                   <YAxis stroke="#94a3b8" />
                   <Tooltip content={<CustomChartTooltip />} />
                   <Legend iconType="circle" />
@@ -422,8 +422,8 @@ export const Analytics: React.FC = () => {
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" className="dark:hidden" />
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" className="hidden dark:block" />
-                <XAxis type="number" stroke="#94a3b8" />
-                <YAxis dataKey="name" type="category" stroke="#94a3b8" width={100} />
+                <XAxis type="number" stroke="#94a3b8" interval="preserveStartEnd" tick={{ fontSize: 10 }} minTickGap={30} />
+                <YAxis dataKey="name" type="category" stroke="#94a3b8" width={80} tick={{ fontSize: 10 }} />
                 <Tooltip content={<CustomChartTooltip />} />
                 <Bar name="Total Consumption Cost (₹)" dataKey="cost" fill="#06b6d4" radius={[0, 4, 4, 0]} />
               </BarChart>

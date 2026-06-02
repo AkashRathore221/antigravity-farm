@@ -307,7 +307,7 @@ export const Harvest: React.FC = () => {
                               deleteHarvest(har.id);
                             }
                           }}
-                          className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900"
+                          className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900"
                         >
                           <Trash2 size={16} />
                         </button>

@@ -392,13 +392,13 @@ export const Weather: React.FC = () => {
               placeholder="Search city or region..."
               value={searchQuery}
               onChange={(e) => handleLocationSearch(e.target.value)}
-              className="text-xs bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 font-semibold text-slate-600 dark:text-slate-300 focus:outline-none focus:border-emerald-500 w-56 pr-8"
+              className="text-xs bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 font-semibold text-slate-600 dark:text-slate-300 focus:outline-none focus:border-emerald-500 w-full sm:w-56 pr-8"
             />
             {searchLoading && (
               <RefreshCw size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
             )}
             {searchResults.length > 0 && (
-              <div className="absolute top-full mt-1 left-0 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl z-50 overflow-hidden">
+              <div className="absolute top-full mt-1 left-0 w-[min(18rem,90vw)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl z-50 overflow-hidden">
                 {searchResults.map((r, i) => (
                   <button
                     key={i}

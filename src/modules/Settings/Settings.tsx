@@ -333,17 +333,17 @@ export const Settings: React.FC = () => {
                   >
                     <span>{displayName}</span>
                     <div className="flex gap-1">
-                      <button 
+                      <button
                         onClick={() => moveWidget(index, 'up')}
                         disabled={index === 0}
-                        className="p-1 rounded bg-slate-200/50 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 disabled:opacity-30 transition-all"
+                        className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded bg-slate-200/50 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 disabled:opacity-30 transition-all"
                       >
                         <ArrowUp size={12} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => moveWidget(index, 'down')}
                         disabled={index === settings.widgetsOrder.length - 1}
-                        className="p-1 rounded bg-slate-200/50 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 disabled:opacity-30 transition-all"
+                        className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded bg-slate-200/50 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 disabled:opacity-30 transition-all"
                       >
                         <ArrowDown size={12} />
                       </button>

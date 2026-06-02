@@ -455,19 +455,19 @@ export const Inventory: React.FC = () => {
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => adjustStock(item.id, -1)}
-                        className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-850 border border-slate-200/10 rounded-lg font-bold text-slate-600 dark:text-slate-400 text-sm"
+                        className="w-11 h-11 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-850 border border-slate-200/10 rounded-lg font-bold text-slate-600 dark:text-slate-400 text-sm"
                       >
                         -
                       </button>
                       <button
                         onClick={() => adjustStock(item.id, 1)}
-                        className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-850 border border-slate-200/10 rounded-lg font-bold text-slate-600 dark:text-slate-400 text-sm"
+                        className="w-11 h-11 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-850 border border-slate-200/10 rounded-lg font-bold text-slate-600 dark:text-slate-400 text-sm"
                       >
                         +
                       </button>
                       <button
                         onClick={() => startEdit(item)}
-                        className="p-1.5 text-slate-400 hover:text-emerald-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900"
+                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-emerald-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900"
                         title="Edit this item"
                       >
                         <Pencil size={14} />
@@ -478,7 +478,7 @@ export const Inventory: React.FC = () => {
                             deleteInventory(item.id);
                           }
                         }}
-                        className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900"
+                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900"
                       >
                         <Trash2 size={14} />
                       </button>

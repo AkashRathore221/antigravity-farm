@@ -236,8 +236,8 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all duration-200 ${
-                  isActive 
+                className={`flex flex-col items-center justify-center gap-1 py-1 px-3 min-h-[44px] rounded-xl transition-all duration-200 ${
+                  isActive
                     ? 'text-emerald-500 dark:text-emerald-400 font-bold scale-105'
                     : 'text-slate-400 dark:text-slate-500'
                 }`}
@@ -250,7 +250,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
           {/* More menu triggers sidebar */}
           <button
             onClick={() => setSidebarOpen(true)}
-            className="flex flex-col items-center gap-1 py-1 px-3 text-slate-400 dark:text-slate-500"
+            className="flex flex-col items-center justify-center gap-1 py-1 px-3 min-h-[44px] text-slate-400 dark:text-slate-500"
           >
             <Menu size={20} />
             <span className="text-[10px] font-semibold tracking-tight">More</span>
