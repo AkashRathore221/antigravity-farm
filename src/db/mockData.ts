@@ -483,26 +483,6 @@ export const defaultSettings: AppSettings = {
     'weatherBrief',
     'activityFeed'
   ],
-  categories: {
-    inventory: [
-      'fertilizers',
-      'pesticides',
-      'fungicides',
-      'insecticides',
-      'bio_stimulants',
-      'sticky_traps',
-      'packaging_material'
-    ],
-    expense: ['labour', 'inventory', 'transport', 'packaging', 'personal_vehicle_fuel', 'miscellaneous']
-  },
-  fields: {
-    mandiRate: true,
-    areaTreated: true,
-    gradesWeight: true
-  },
-  supabaseUrl: '',
-  supabaseAnonKey: '',
-  isOnlineSyncEnabled: false,
   farmProfile: {
     farmName: '',
     ownerName: '',

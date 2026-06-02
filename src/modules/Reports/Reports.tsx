@@ -132,9 +132,9 @@ export const Reports: React.FC = () => {
 
   // Trigger Excel CSV exports
   const exportCrops = () => {
-    const headers = ['ID', 'Name', 'Variety', 'Seed Company', 'Start Date', 'Transplant Date', 'Expected End Date', 'End Date', 'Area Covered (sqm)', 'Num Plants', 'Status', 'Notes'];
+    const headers = ['ID', 'Name', 'Variety', 'Seed Company', 'Start Date', 'Transplant Date', 'Expected End Date', 'End Date', 'Area Covered (sqm)', 'Num Plants', 'Seed/Nursery Cost', 'Target Yield (kg)', 'Status', 'Notes'];
     const rows = crops.map(c => [
-      c.id, c.name, c.variety, c.seed_company, c.start_date, c.transplant_date, c.expected_end_date, c.end_date || '', c.area_covered, c.num_plants, c.status, c.notes
+      c.id, c.name, c.variety, c.seed_company, c.start_date, c.transplant_date, c.expected_end_date, c.end_date || '', c.area_covered, c.num_plants, c.seed_nursery_cost, c.target_yield_kg ?? '', c.status, c.notes
     ]);
     downloadCSV(headers, rows, 'crops_ledger.csv');
   };
@@ -178,6 +178,14 @@ export const Reports: React.FC = () => {
       ];
     });
     downloadCSV(headers, rows, 'operating_expenses_ledger.csv');
+  };
+
+  const exportWeatherLogs = () => {
+    const headers = ['Date', 'Temperature', 'Temp Min', 'Temp Max', 'Humidity', 'Rainfall', 'VPD', 'Dew Point', 'Notes'];
+    const rows = weatherLogs.map(w => [
+      w.date, w.temp, w.temp_min ?? '', w.temp_max ?? '', w.humidity, w.rainfall, w.vpd ?? '', w.dew_point ?? '', (w as { notes?: string }).notes ?? ''
+    ]);
+    downloadCSV(headers, rows, 'weather_logs.csv');
   };
 
   const exportBackupJSON = () => {
@@ -253,7 +261,11 @@ export const Reports: React.FC = () => {
               <span>Harvests</span>
               <Download size={12} className="opacity-65" />
             </button>
-            <button onClick={exportExpenses} className="col-span-2 flex items-center justify-between px-3 py-2 bg-slate-100/50 hover:bg-slate-200/50 dark:bg-slate-900/50 dark:hover:bg-slate-800/50 rounded-xl font-semibold transition-all text-emerald-600 dark:text-emerald-400">
+            <button onClick={exportWeatherLogs} className="flex items-center justify-between px-3 py-2 bg-slate-100/50 hover:bg-slate-200/50 dark:bg-slate-900/50 dark:hover:bg-slate-800/50 rounded-xl font-semibold transition-all">
+              <span>Weather Logs</span>
+              <Download size={12} className="opacity-65" />
+            </button>
+            <button onClick={exportExpenses} className="flex items-center justify-between px-3 py-2 bg-slate-100/50 hover:bg-slate-200/50 dark:bg-slate-900/50 dark:hover:bg-slate-800/50 rounded-xl font-semibold transition-all text-emerald-600 dark:text-emerald-400">
               <span>Operating Expenses Ledger</span>
               <Download size={12} />
             </button>

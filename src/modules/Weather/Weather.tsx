@@ -173,6 +173,18 @@ export const Weather: React.FC = () => {
   }, []);
 
   const captureGpsLocation = () => {
+    // Priority 1: precise saved farm coordinates beat the phone's GPS.
+    const fp = settings.farmProfile;
+    if (typeof fp?.farmLat === 'number' && typeof fp?.farmLng === 'number' && (fp.farmLat !== 0 || fp.farmLng !== 0)) {
+      const lat = fp.farmLat, lon = fp.farmLng;
+      activeCoordsRef.current = { lat, lon };
+      setActiveCoords({ lat, lon });
+      setHasCoords(true);
+      setLocationName(`Farm: ${lat}° N, ${lon}° E`);
+      setSearchQuery(`Farm: ${lat}° N, ${lon}° E`);
+      fetchWeather(lat, lon);
+      return;
+    }
     if (!navigator.geolocation) {
       alert('Geolocation is not supported by your browser.');
       return;
@@ -261,9 +273,33 @@ export const Weather: React.FC = () => {
 
   const vpdInfo = todayWeather ? vpdStatus(todayWeather.vpd) : null;
 
-  // Auto-fetch on mount (silent GPS) + 30-min refresh interval
+  // Auto-fetch on mount + 30-min refresh interval. Location priority:
+  // 1) saved farm coordinates, 2) device GPS, 3) farmCity geocoding, 4) none.
   useEffect(() => {
-    if (navigator.geolocation) {
+    const fp = settings.farmProfile;
+    const hasFarmCoords = typeof fp?.farmLat === 'number' && typeof fp?.farmLng === 'number' && (fp.farmLat !== 0 || fp.farmLng !== 0);
+
+    const useCityFallback = () => {
+      const city = fp?.farmCity;
+      if (!city) return;
+      fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`)
+        .then(r => r.json())
+        .then(d => {
+          const r = (d.results as GeoResult[] | undefined)?.[0];
+          if (r) selectLocation(r);
+        })
+        .catch(() => { /* silent */ });
+    };
+
+    if (hasFarmCoords) {
+      const lat = fp!.farmLat as number, lon = fp!.farmLng as number;
+      activeCoordsRef.current = { lat, lon };
+      setActiveCoords({ lat, lon });
+      setHasCoords(true);
+      setLocationName(`Farm: ${lat}° N, ${lon}° E`);
+      setSearchQuery(`Farm: ${lat}° N, ${lon}° E`);
+      fetchWeather(lat, lon);
+    } else if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const lat = parseFloat(pos.coords.latitude.toFixed(4));
@@ -275,19 +311,10 @@ export const Weather: React.FC = () => {
           setSearchQuery(`GPS: ${lat}° N, ${lon}° E`);
           fetchWeather(lat, lon);
         },
-        () => {
-          const city = settings.farmProfile?.farmCity;
-          if (city) {
-            fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`)
-              .then(r => r.json())
-              .then(d => {
-                const r = (d.results as GeoResult[] | undefined)?.[0];
-                if (r) selectLocation(r);
-              })
-              .catch(() => { /* silent */ });
-          }
-        }
+        () => { useCityFallback(); }
       );
+    } else {
+      useCityFallback();
     }
 
     const refreshInterval = setInterval(() => {

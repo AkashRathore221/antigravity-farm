@@ -143,18 +143,6 @@ export interface AppSettings {
     photoUploads: boolean;
   };
   widgetsOrder: string[]; // Order of cards on dashboard
-  categories: {
-    inventory: string[];
-    expense: string[];
-  };
-  fields: {
-    mandiRate: boolean;
-    areaTreated: boolean;
-    gradesWeight: boolean;
-  };
-  supabaseUrl: string;
-  supabaseAnonKey: string;
-  isOnlineSyncEnabled: boolean;
   farmProfile?: {
     farmName: string;
     ownerName: string;
@@ -171,6 +159,7 @@ export interface SyncQueueItem {
   // Settings are intentionally NOT in this union — they're local-only,
   // see updateSettings() in src/store/useAppStore.ts.
   table: 'crops' | 'inventory' | 'usage_logs' | 'harvests' | 'expenses' | 'weather_logs';
-  data: any;
+  // A full record for insert/update, or just an id for delete entries.
+  data: Crop | InventoryItem | UsageLog | Harvest | Expense | WeatherLog | { id: string };
   timestamp: string;
 }

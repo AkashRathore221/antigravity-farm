@@ -48,6 +48,19 @@ export const Settings: React.FC = () => {
   // Active crop params form state
   const [cropArea, setCropArea] = useState(String(activeCrop?.area_covered ?? ''));
   const [cropPlants, setCropPlants] = useState(String(activeCrop?.num_plants ?? ''));
+  const [cropParamError, setCropParamError] = useState<string | null>(null);
+
+  const handleUpdateCropParams = () => {
+    const area = Number(cropArea);
+    const plants = Number(cropPlants);
+    if (!(area > 0) || !(plants > 0)) {
+      setCropParamError('Area and plant count must be greater than zero.');
+      setTimeout(() => setCropParamError(null), 3000);
+      return;
+    }
+    setCropParamError(null);
+    updateActiveCropParams(area, plants);
+  };
 
   useEffect(() => {
     setCropArea(String(activeCrop?.area_covered ?? ''));
@@ -189,7 +202,7 @@ export const Settings: React.FC = () => {
                     min="0"
                     step="any"
                     value={cropArea}
-                    onChange={e => setCropArea(e.target.value)}
+                    onChange={e => { setCropArea(e.target.value); setCropParamError(null); }}
                     className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -200,13 +213,18 @@ export const Settings: React.FC = () => {
                     min="0"
                     step="1"
                     value={cropPlants}
-                    onChange={e => setCropPlants(e.target.value)}
+                    onChange={e => { setCropPlants(e.target.value); setCropParamError(null); }}
                     className="w-full bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/30 dark:border-slate-800/30 rounded-xl px-3 py-2 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
+              {cropParamError && (
+                <p className="text-[11px] font-semibold text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+                  {cropParamError}
+                </p>
+              )}
               <button
-                onClick={() => updateActiveCropParams(Number(cropArea) || 0, Number(cropPlants) || 0)}
+                onClick={handleUpdateCropParams}
                 className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold rounded-xl text-xs shadow-md transition-all"
               >
                 Update Crop Parameters

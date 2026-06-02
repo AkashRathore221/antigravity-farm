@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import {
   Sprout, AlertTriangle, CloudSun,
@@ -19,113 +19,96 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
     updateWidgetOrder 
   } = useAppStore();
 
-  const activeCrop = crops.find(c => c.status === 'active');
+  const activeCrop = useMemo(() => crops.find(c => c.status === 'active'), [crops]);
 
-  // 1. Calculations if crop is active
-  let daysSinceTransplant = 0;
-  let totalProduction = 0;
-  let totalRevenue = 0;
-  let totalGeneralExpenses = 0;
-  let totalUsageExpenses = 0;
-  let totalExpenses = 0;
-  let netProfit = 0;
-  let roi = 0;
-  let costPerKg = 0;
-  let costPerPlant = 0;
-  if (activeCrop) {
-    // Days since transplant — guard against empty / invalid transplant_date,
-    // which would otherwise make `new Date(...).getTime()` return NaN and
-    // render "NaN days".
-    const tDate = new Date(activeCrop.transplant_date);
-    if (!isNaN(tDate.getTime())) {
-      const today = new Date();
-      const diffTime = Math.abs(today.getTime() - tDate.getTime());
-      daysSinceTransplant = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  // 1. Financial KPIs for the active crop — recompute only when the active
+  //    crop or the underlying records change.
+  const {
+    daysSinceTransplant, totalProduction, totalGeneralExpenses,
+    totalUsageExpenses, totalExpenses, netProfit, roi, costPerKg, costPerPlant,
+  } = useMemo(() => {
+    let daysSinceTransplant = 0;
+    let totalProduction = 0;
+    let totalRevenue = 0;
+    let totalGeneralExpenses = 0;
+    let totalUsageExpenses = 0;
+    let totalExpenses = 0;
+    let netProfit = 0;
+    let roi = 0;
+    let costPerKg = 0;
+    let costPerPlant = 0;
+    if (activeCrop) {
+      // Days since transplant — guard against empty / invalid transplant_date,
+      // which would otherwise make `new Date(...).getTime()` return NaN.
+      const tDate = new Date(activeCrop.transplant_date);
+      if (!isNaN(tDate.getTime())) {
+        const today = new Date();
+        const diffTime = Math.abs(today.getTime() - tDate.getTime());
+        daysSinceTransplant = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      }
+      // totalProduction is gross (incl. wastage) for display; marketableProduction
+      // (Grade A+B+C) is the basis for cost/kg.
+      const cropHarvests = harvests.filter(h => h.crop_id === activeCrop.id);
+      totalProduction = cropHarvests.reduce((sum, h) => sum + Number(h.weight_total), 0);
+      const marketableProduction = cropHarvests.reduce(
+        (sum, h) => sum + Number(h.weight_grade_a) + Number(h.weight_grade_b) + Number(h.weight_grade_c), 0);
+      totalRevenue = cropHarvests.reduce((sum, h) => sum + Number(h.revenue), 0);
+      const cropExpenses = expenses.filter(e => e.crop_id === activeCrop.id);
+      totalGeneralExpenses = cropExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+      const cropUsages = usageLogs.filter(u => u.crop_id === activeCrop.id);
+      totalUsageExpenses = cropUsages.reduce((sum, u) => sum + Number(u.cost), 0);
+      totalExpenses = totalGeneralExpenses + totalUsageExpenses + (activeCrop.seed_nursery_cost ?? 0);
+      netProfit = totalRevenue - totalExpenses;
+      if (totalExpenses > 0) roi = parseFloat(((netProfit / totalExpenses) * 100).toFixed(1));
+      if (marketableProduction > 0) costPerKg = parseFloat((totalExpenses / marketableProduction).toFixed(2));
+      if (activeCrop.num_plants > 0) costPerPlant = parseFloat((totalExpenses / activeCrop.num_plants).toFixed(2));
     }
-
-    // Active harvests. totalProduction is gross (incl. wastage) for display;
-    // marketableProduction (Grade A+B+C) is the basis for cost/kg.
-    const cropHarvests = harvests.filter(h => h.crop_id === activeCrop.id);
-    totalProduction = cropHarvests.reduce((sum, h) => sum + Number(h.weight_total), 0);
-    const marketableProduction = cropHarvests.reduce(
-      (sum, h) => sum + Number(h.weight_grade_a) + Number(h.weight_grade_b) + Number(h.weight_grade_c), 0);
-    totalRevenue = cropHarvests.reduce((sum, h) => sum + Number(h.revenue), 0);
-
-    // Active general expenses (Labour, Transport, Packaging, Misc)
-    const cropExpenses = expenses.filter(e => e.crop_id === activeCrop.id);
-    totalGeneralExpenses = cropExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
-
-    // Active usage expenses (Fertigation, Sprays)
-    const cropUsages = usageLogs.filter(u => u.crop_id === activeCrop.id);
-    totalUsageExpenses = cropUsages.reduce((sum, u) => sum + Number(u.cost), 0);
-
-    // Combine (include upfront seed/nursery cost from crop record)
-    totalExpenses = totalGeneralExpenses + totalUsageExpenses + (activeCrop.seed_nursery_cost ?? 0);
-    netProfit = totalRevenue - totalExpenses;
-    
-    if (totalExpenses > 0) {
-      roi = parseFloat(((netProfit / totalExpenses) * 100).toFixed(1));
-    }
-    if (marketableProduction > 0) {
-      costPerKg = parseFloat((totalExpenses / marketableProduction).toFixed(2));
-    }
-    if (activeCrop.num_plants > 0) {
-      costPerPlant = parseFloat((totalExpenses / activeCrop.num_plants).toFixed(2));
-    }
-  }
+    return { daysSinceTransplant, totalProduction, totalRevenue, totalGeneralExpenses, totalUsageExpenses, totalExpenses, netProfit, roi, costPerKg, costPerPlant };
+  }, [activeCrop, harvests, expenses, usageLogs]);
 
   // 2. Low stock alerts
-  const lowStockItems = inventory.filter(item => item.remaining_qty <= item.low_stock_threshold);
+  const lowStockItems = useMemo(
+    () => inventory.filter(item => item.remaining_qty <= item.low_stock_threshold),
+    [inventory]);
 
-  // 3. Upcoming Spray/Fertigation reminders
-  // Find all usage logs that have a repeat schedule enabled
-  const recurringItems = usageLogs
-    .filter(u => u.repeat_schedule && u.repeat_interval_days)
-    .reduce((acc, log) => {
-      // Keep only the latest log per product
-      const key = `${log.product_name}-${log.type}`;
-      if (!acc[key] || new Date(log.date) > new Date(acc[key].date)) {
-        acc[key] = log;
-      }
-      return acc;
-    }, {} as Record<string, typeof usageLogs[0]>);
-
-  const upcomingReminders = Object.values(recurringItems).map(log => {
-    const lastDate = new Date(log.date);
-    const interval = log.repeat_interval_days || 7;
-    const nextDate = new Date(lastDate);
-    nextDate.setDate(lastDate.getDate() + interval);
-    
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    nextDate.setHours(0,0,0,0);
-    
-    const diffTime = nextDate.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    return {
-      id: log.id,
-      product: log.product_name,
-      type: log.type,
-      interval,
-      nextDate: nextDate.toISOString().split('T')[0],
-      daysRemaining: diffDays
-    };
-  }).sort((a, b) => a.daysRemaining - b.daysRemaining);
+  // 3. Upcoming Spray/Fertigation reminders (latest recurring log per product)
+  const upcomingReminders = useMemo(() => {
+    const recurringItems = usageLogs
+      .filter(u => u.repeat_schedule && u.repeat_interval_days)
+      .reduce((acc, log) => {
+        const key = `${log.product_name}-${log.type}`;
+        if (!acc[key] || new Date(log.date) > new Date(acc[key].date)) acc[key] = log;
+        return acc;
+      }, {} as Record<string, typeof usageLogs[0]>);
+    return Object.values(recurringItems).map(log => {
+      const lastDate = new Date(log.date);
+      const interval = log.repeat_interval_days || 7;
+      const nextDate = new Date(lastDate);
+      nextDate.setDate(lastDate.getDate() + interval);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      nextDate.setHours(0, 0, 0, 0);
+      const diffTime = nextDate.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return {
+        id: log.id, product: log.product_name, type: log.type, interval,
+        nextDate: nextDate.toISOString().split('T')[0], daysRemaining: diffDays,
+      };
+    }).sort((a, b) => a.daysRemaining - b.daysRemaining);
+  }, [usageLogs]);
 
   // 4. Latest Weather Log — sort by date so the result doesn't depend on
   //    the store's insertion order (which can drift after a Supabase pull).
-  const latestWeather = weatherLogs.length > 0
-    ? [...weatherLogs].sort((a, b) => b.date.localeCompare(a.date))[0]
-    : null;
+  const latestWeather = useMemo(
+    () => weatherLogs.length > 0 ? [...weatherLogs].sort((a, b) => b.date.localeCompare(a.date))[0] : null,
+    [weatherLogs]);
 
-  // 5. Sparkline Helpers
+  // 5. Sparkline Helpers (pure — defined once per render)
   const getSparklinePath = (data: number[], width: number, height: number): string => {
     if (data.length < 2) return '';
     const max = Math.max(...data, 10);
     const min = Math.min(...data, 0);
     const range = max - min === 0 ? 1 : max - min;
-    
     return data.map((val, index) => {
       const x = (index / (data.length - 1)) * width;
       const y = height - ((val - min) / range) * height;
@@ -134,19 +117,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
   };
 
   // Sparkline data for active crop
-  const lastCropsHarvests = activeCrop 
-    ? harvests.filter(h => h.crop_id === activeCrop.id).slice(-6).reverse().map(h => Number(h.weight_total))
-    : [];
-  
-  const lastCropsExpenses = activeCrop
-    ? expenses.filter(e => e.crop_id === activeCrop.id).slice(-6).reverse().map(e => Number(e.amount))
-    : [];
+  const { lastCropsHarvests, lastCropsExpenses } = useMemo(() => ({
+    lastCropsHarvests: activeCrop
+      ? harvests.filter(h => h.crop_id === activeCrop.id).slice(-6).reverse().map(h => Number(h.weight_total))
+      : [],
+    lastCropsExpenses: activeCrop
+      ? expenses.filter(e => e.crop_id === activeCrop.id).slice(-6).reverse().map(e => Number(e.amount))
+      : [],
+  }), [activeCrop, harvests, expenses]);
 
   const harvestSparkline = getSparklinePath(lastCropsHarvests, 140, 32);
   const expenseSparkline = getSparklinePath(lastCropsExpenses, 140, 32);
 
   // Cumulative revenue vs. expense trend for active crop
-  const buildCumulativeTrend = () => {
+  const cumulativeTrend = useMemo(() => {
     if (!activeCrop) return [];
     const events: Array<{ date: string; revDelta: number; expDelta: number }> = [
       ...harvests.filter(h => h.crop_id === activeCrop.id).map(h => ({ date: h.date, revDelta: Number(h.revenue), expDelta: 0 })),
@@ -168,26 +152,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
       cumExp += grouped[date].exp;
       return { date, revenue: parseFloat(cumRev.toFixed(2)), expenses: parseFloat(cumExp.toFixed(2)) };
     });
-  };
-  const cumulativeTrend = buildCumulativeTrend();
+  }, [activeCrop, harvests, expenses, usageLogs]);
 
   // Last archived crop for no-crop empty state
-  const lastArchivedCrop = crops
-    .filter(c => c.status === 'archived')
-    .sort((a, b) => (b.end_date ?? '').localeCompare(a.end_date ?? ''))[0] ?? null;
-  const lastArchivedStats = lastArchivedCrop ? (() => {
-    const ch = harvests.filter(h => h.crop_id === lastArchivedCrop.id);
-    const ce = expenses.filter(e => e.crop_id === lastArchivedCrop.id);
-    const cu = usageLogs.filter(u => u.crop_id === lastArchivedCrop.id);
-    const yld = ch.reduce((s, h) => s + Number(h.weight_total), 0);
-    const marketable = ch.reduce((s, h) => s + Number(h.weight_grade_a) + Number(h.weight_grade_b) + Number(h.weight_grade_c), 0);
-    const rev = ch.reduce((s, h) => s + Number(h.revenue), 0);
-    const exp = ce.reduce((s, e) => s + Number(e.amount), 0) + cu.reduce((s, u) => s + Number(u.cost), 0) + (lastArchivedCrop.seed_nursery_cost ?? 0);
-    const start = new Date(lastArchivedCrop.start_date);
-    const end = lastArchivedCrop.end_date ? new Date(lastArchivedCrop.end_date) : new Date();
-    const dur = Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    return { yield: yld, revenue: rev, expenses: exp, profit: rev - exp, costKg: marketable > 0 ? exp / marketable : 0, duration: dur };
-  })() : null;
+  const { lastArchivedCrop, lastArchivedStats } = useMemo(() => {
+    const archived = crops
+      .filter(c => c.status === 'archived')
+      .sort((a, b) => (b.end_date ?? '').localeCompare(a.end_date ?? ''))[0] ?? null;
+    const stats = archived ? (() => {
+      const ch = harvests.filter(h => h.crop_id === archived.id);
+      const ce = expenses.filter(e => e.crop_id === archived.id);
+      const cu = usageLogs.filter(u => u.crop_id === archived.id);
+      const yld = ch.reduce((s, h) => s + Number(h.weight_total), 0);
+      const marketable = ch.reduce((s, h) => s + Number(h.weight_grade_a) + Number(h.weight_grade_b) + Number(h.weight_grade_c), 0);
+      const rev = ch.reduce((s, h) => s + Number(h.revenue), 0);
+      const exp = ce.reduce((s, e) => s + Number(e.amount), 0) + cu.reduce((s, u) => s + Number(u.cost), 0) + (archived.seed_nursery_cost ?? 0);
+      const start = new Date(archived.start_date);
+      const end = archived.end_date ? new Date(archived.end_date) : new Date();
+      const dur = Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      return { yield: yld, revenue: rev, expenses: exp, profit: rev - exp, costKg: marketable > 0 ? exp / marketable : 0, duration: dur };
+    })() : null;
+    return { lastArchivedCrop: archived, lastArchivedStats: stats };
+  }, [crops, harvests, expenses, usageLogs]);
 
   // Widget Reordering logic
   const moveWidget = (index: number, direction: 'up' | 'down') => {

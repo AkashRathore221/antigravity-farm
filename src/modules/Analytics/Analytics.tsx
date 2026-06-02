@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, Line,
@@ -8,54 +8,47 @@ import { BarChart3 } from 'lucide-react';
 
 export const Analytics: React.FC = () => {
   const { harvests, expenses, usageLogs, crops, settings } = useAppStore();
-  const activeCrop = crops.find(c => c.status === 'active');
+  const activeCrop = useMemo(() => crops.find(c => c.status === 'active'), [crops]);
 
   const [timeFilter, setTimeFilter] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
-  if (!settings.features.charts) {
-    return (
-      <div className="glass rounded-2xl p-8 border border-slate-200/30 dark:border-slate-800/30 text-center text-slate-400 italic">
-        Interactive Charts are disabled from the settings panel. Enable them to view analytics.
-      </div>
-    );
-  }
+  // 1. Filter data for the active crop (or all if no active) — memoized so the
+  //    derived datasets below recompute only when the source data changes.
+  const cropHarvests = useMemo(() => activeCrop ? harvests.filter(h => h.crop_id === activeCrop.id) : harvests, [activeCrop, harvests]);
+  const cropExpenses = useMemo(() => activeCrop ? expenses.filter(e => e.crop_id === activeCrop.id) : expenses, [activeCrop, expenses]);
+  const cropUsages = useMemo(() => activeCrop ? usageLogs.filter(u => u.crop_id === activeCrop.id) : usageLogs, [activeCrop, usageLogs]);
 
-  // 1. Filter data for the active crop (or all if no active)
-  const cropHarvests = activeCrop ? harvests.filter(h => h.crop_id === activeCrop.id) : harvests;
-  const cropExpenses = activeCrop ? expenses.filter(e => e.crop_id === activeCrop.id) : expenses;
-  const cropUsages = activeCrop ? usageLogs.filter(u => u.crop_id === activeCrop.id) : usageLogs;
+  const seedCost = activeCrop?.seed_nursery_cost ?? 0;
 
-  // 2. Prep Graded Yield Pie Data
-  const totalGradeA = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_a), 0);
-  const totalGradeB = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_b), 0);
-  const totalGradeC = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_c), 0);
-  const totalWastage = cropHarvests.reduce((sum, h) => sum + Number(h.wastage), 0);
-
-  const pieData = [
-    { name: 'Grade A (Premium)', value: totalGradeA, color: '#10b981' },
-    { name: 'Grade B (Curves)', value: totalGradeB, color: '#6ee7b7' },
-    { name: 'Grade C (Feed)', value: totalGradeC, color: '#fbbf24' },
-    { name: 'Wastage (Pest/Rot)', value: totalWastage, color: '#f43f5e' }
-  ].filter(d => d.value > 0);
-
-  // Pure helper — no Date mutation, handles month-boundary correctly.
-  const getWeekStart = (dateStr: string): string => {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const date = new Date(y, m - 1, d);
-    const dayOfWeek = date.getDay(); // 0=Sun
-    return new Date(y, m - 1, d - dayOfWeek).toISOString().split('T')[0];
-  };
-
-  const getGroupKey = (dateStr: string): string => {
-    if (timeFilter === 'weekly') return getWeekStart(dateStr);
-    if (timeFilter === 'monthly') return dateStr.substring(0, 7);
-    return dateStr;
-  };
+  // 2. Graded Yield Pie Data
+  const pieData = useMemo(() => {
+    const totalGradeA = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_a), 0);
+    const totalGradeB = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_b), 0);
+    const totalGradeC = cropHarvests.reduce((sum, h) => sum + Number(h.weight_grade_c), 0);
+    const totalWastage = cropHarvests.reduce((sum, h) => sum + Number(h.wastage), 0);
+    return [
+      { name: 'Grade A (Premium)', value: totalGradeA, color: '#10b981' },
+      { name: 'Grade B (Curves)', value: totalGradeB, color: '#6ee7b7' },
+      { name: 'Grade C (Feed)', value: totalGradeC, color: '#fbbf24' },
+      { name: 'Wastage (Pest/Rot)', value: totalWastage, color: '#f43f5e' }
+    ].filter(d => d.value > 0);
+  }, [cropHarvests]);
 
   // 3. Dynamic Grouping by Date for Trends
-  const groupData = () => {
+  const trendData = useMemo(() => {
+    // Pure helper — no Date mutation, handles month-boundary correctly.
+    const getWeekStart = (dateStr: string): string => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const date = new Date(y, m - 1, d);
+      const dayOfWeek = date.getDay(); // 0=Sun
+      return new Date(y, m - 1, d - dayOfWeek).toISOString().split('T')[0];
+    };
+    const getGroupKey = (dateStr: string): string => {
+      if (timeFilter === 'weekly') return getWeekStart(dateStr);
+      if (timeFilter === 'monthly') return dateStr.substring(0, 7);
+      return dateStr;
+    };
     const dataMap: Record<string, { date: string; yield: number; revenue: number; expense: number }> = {};
-
     const addToMap = (dateStr: string, yieldVal: number, rev: number, exp: number) => {
       const key = getGroupKey(dateStr);
       if (!dataMap[key]) dataMap[key] = { date: key, yield: 0, revenue: 0, expense: 0 };
@@ -63,7 +56,6 @@ export const Analytics: React.FC = () => {
       dataMap[key].revenue += rev;
       dataMap[key].expense += exp;
     };
-
     // Yield series uses marketable weight (Grade A+B+C, excludes wastage) so it
     // matches the cost/kg and yield KPIs elsewhere in the app.
     cropHarvests.forEach(h => addToMap(h.date, Number(h.weight_grade_a) + Number(h.weight_grade_b) + Number(h.weight_grade_c), Number(h.revenue), 0));
@@ -72,45 +64,42 @@ export const Analytics: React.FC = () => {
     if (activeCrop && (activeCrop.seed_nursery_cost ?? 0) > 0) {
       addToMap(activeCrop.start_date, 0, 0, activeCrop.seed_nursery_cost ?? 0);
     }
-
     return Object.values(dataMap).sort((a, b) => a.date.localeCompare(b.date));
-  };
+  }, [cropHarvests, cropExpenses, cropUsages, timeFilter, activeCrop]);
 
-  const trendData = groupData();
-
-  // 4. Prep Inventory Consumption Data
-  const consumptionMap: Record<string, { name: string; quantity: number; unit: string; cost: number }> = {};
-  cropUsages.forEach(u => {
-    if (!consumptionMap[u.product_name]) {
-      consumptionMap[u.product_name] = { name: u.product_name, quantity: 0, unit: u.unit, cost: 0 };
-    }
-    consumptionMap[u.product_name].quantity += Number(u.quantity_used);
-    consumptionMap[u.product_name].cost += Number(u.cost);
-  });
-
-  const consumptionData = Object.values(consumptionMap)
-    .sort((a, b) => b.cost - a.cost)
-    .slice(0, 5);
+  // 4. Inventory Consumption Data (top 5 by cost)
+  const consumptionData = useMemo(() => {
+    const consumptionMap: Record<string, { name: string; quantity: number; unit: string; cost: number }> = {};
+    cropUsages.forEach(u => {
+      if (!consumptionMap[u.product_name]) {
+        consumptionMap[u.product_name] = { name: u.product_name, quantity: 0, unit: u.unit, cost: 0 };
+      }
+      consumptionMap[u.product_name].quantity += Number(u.quantity_used);
+      consumptionMap[u.product_name].cost += Number(u.cost);
+    });
+    return Object.values(consumptionMap).sort((a, b) => b.cost - a.cost).slice(0, 5);
+  }, [cropUsages]);
 
   // 5. Expense category donut data
-  const seedCost = activeCrop?.seed_nursery_cost ?? 0;
-  const getCatTotal = (cat: string) => {
-    let sum = cropExpenses.filter(e => e.category === cat).reduce((s, e) => s + Number(e.amount), 0);
-    if (cat === 'inventory') sum += cropUsages.reduce((s, u) => s + Number(u.cost), 0);
-    return sum;
-  };
-  const expCatData = [
-    { name: 'Labour', value: getCatTotal('labour'), color: '#10b981' },
-    { name: 'Inventory & Materials', value: getCatTotal('inventory'), color: '#2dd4bf' },
-    { name: 'Transport', value: getCatTotal('transport'), color: '#fbbf24' },
-    { name: 'Packaging', value: getCatTotal('packaging'), color: '#6366f1' },
-    { name: 'Fuel', value: getCatTotal('personal_vehicle_fuel'), color: '#fb923c' },
-    { name: 'Miscellaneous', value: getCatTotal('miscellaneous'), color: '#94a3b8' },
-    ...(seedCost > 0 ? [{ name: 'Seed / Nursery', value: seedCost, color: '#059669' }] : []),
-  ].filter(d => d.value > 0);
+  const expCatData = useMemo(() => {
+    const getCatTotal = (cat: string) => {
+      let sum = cropExpenses.filter(e => e.category === cat).reduce((s, e) => s + Number(e.amount), 0);
+      if (cat === 'inventory') sum += cropUsages.reduce((s, u) => s + Number(u.cost), 0);
+      return sum;
+    };
+    return [
+      { name: 'Labour', value: getCatTotal('labour'), color: '#10b981' },
+      { name: 'Inventory & Materials', value: getCatTotal('inventory'), color: '#2dd4bf' },
+      { name: 'Transport', value: getCatTotal('transport'), color: '#fbbf24' },
+      { name: 'Packaging', value: getCatTotal('packaging'), color: '#6366f1' },
+      { name: 'Fuel', value: getCatTotal('personal_vehicle_fuel'), color: '#fb923c' },
+      { name: 'Miscellaneous', value: getCatTotal('miscellaneous'), color: '#94a3b8' },
+      ...(seedCost > 0 ? [{ name: 'Seed / Nursery', value: seedCost, color: '#059669' }] : []),
+    ].filter(d => d.value > 0);
+  }, [cropExpenses, cropUsages, seedCost]);
 
   // 6. Cumulative Revenue vs Cost trend with net profit
-  const cumulativeTrend = (() => {
+  const cumulativeTrend = useMemo(() => {
     const events: Array<{ date: string; rev: number; exp: number }> = [
       ...cropHarvests.map(h => ({ date: h.date, rev: Number(h.revenue), exp: 0 })),
       ...cropExpenses.map(e => ({ date: e.date, rev: 0, exp: Number(e.amount) })),
@@ -129,7 +118,17 @@ export const Analytics: React.FC = () => {
       cumExp += grouped[date].exp;
       return { date, revenue: parseFloat(cumRev.toFixed(2)), expenses: parseFloat(cumExp.toFixed(2)), net: parseFloat((cumRev - cumExp).toFixed(2)) };
     });
-  })();
+  }, [cropHarvests, cropExpenses, cropUsages, seedCost, activeCrop]);
+
+  // Charts can be disabled in settings — early-return AFTER all hooks so hook
+  // order stays unconditional.
+  if (!settings.features.charts) {
+    return (
+      <div className="glass rounded-2xl p-8 border border-slate-200/30 dark:border-slate-800/30 text-center text-slate-400 italic">
+        Interactive Charts are disabled from the settings panel. Enable them to view analytics.
+      </div>
+    );
+  }
 
   // Custom tooltips for Recharts (Glassmorphism look)
   const CustomChartTooltip = ({ active, payload, label }: any) => {

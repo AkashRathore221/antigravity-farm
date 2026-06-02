@@ -103,7 +103,9 @@ function addToQueue(
     console.warn('[Queue] Rejected entry with missing id:', table, action, data);
     return queue;
   }
-  const newEntry: SyncQueueItem = { id: newId(), action, table, data, timestamp: new Date().toISOString() };
+  // Safe: the guard above proved `data` is an object carrying a string id,
+  // which satisfies the SyncQueueItem['data'] union.
+  const newEntry: SyncQueueItem = { id: newId(), action, table, data: data as SyncQueueItem['data'], timestamp: new Date().toISOString() };
   const recordId = data && typeof data === 'object' && 'id' in (data as object)
     ? (data as { id: string }).id
     : null;
