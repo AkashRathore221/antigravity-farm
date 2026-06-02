@@ -147,8 +147,6 @@ export interface AppSettings {
     farmName: string;
     ownerName: string;
     farmCity: string;
-    farmLat?: number;
-    farmLng?: number;
     totalAreaSqM: number;
   };
 }

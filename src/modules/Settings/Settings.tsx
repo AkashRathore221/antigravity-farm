@@ -29,20 +29,19 @@ export const Settings: React.FC = () => {
   const [ownerName, setOwnerName] = useState(fp?.ownerName ?? '');
   const [farmCity, setFarmCity] = useState(fp?.farmCity ?? '');
   const [totalArea, setTotalArea] = useState(String(fp?.totalAreaSqM ?? ''));
-  const [farmLat, setFarmLat] = useState(String(fp?.farmLat ?? ''));
-  const [farmLng, setFarmLng] = useState(String(fp?.farmLng ?? ''));
+  const [farmSaved, setFarmSaved] = useState(false);
 
   const saveFarmProfile = () => {
-    updateSettings({
-      farmProfile: {
-        farmName,
-        ownerName,
-        farmCity,
-        totalAreaSqM: Number(totalArea) || 0,
-        farmLat: farmLat ? Number(farmLat) : undefined,
-        farmLng: farmLng ? Number(farmLng) : undefined,
-      }
-    });
+    const farmProfile = {
+      farmName,
+      ownerName,
+      farmCity,
+      totalAreaSqM: Number(totalArea) || 0,
+    };
+    console.log('[Settings] Saving farm profile:', farmProfile);
+    updateSettings({ farmProfile });
+    setFarmSaved(true);
+    setTimeout(() => setFarmSaved(false), 2000);
   };
 
   // Active crop params form state
@@ -158,8 +157,6 @@ export const Settings: React.FC = () => {
                 { label: 'Owner / Manager', value: ownerName, set: setOwnerName, placeholder: 'e.g. Akash Rathore', type: 'text' },
                 { label: 'Nearest City (for Weather)', value: farmCity, set: setFarmCity, placeholder: 'e.g. Nashik', type: 'text' },
                 { label: 'Total Farm Area (m²)', value: totalArea, set: setTotalArea, placeholder: 'e.g. 4000', type: 'number' },
-                { label: 'Farm Latitude', value: farmLat, set: setFarmLat, placeholder: 'e.g. 20.0059', type: 'number' },
-                { label: 'Farm Longitude', value: farmLng, set: setFarmLng, placeholder: 'e.g. 73.7897', type: 'number' },
               ] as Array<{ label: string; value: string; set: (v: string) => void; placeholder: string; type: string }>).map(({ label, value, set, placeholder, type }) => (
                 <div key={label} className="space-y-1">
                   <label className="text-slate-400 text-[10px] uppercase tracking-wider">{label}</label>
@@ -174,12 +171,19 @@ export const Settings: React.FC = () => {
                 </div>
               ))}
             </div>
-            <button
-              onClick={saveFarmProfile}
-              className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold rounded-xl text-xs shadow-md transition-all"
-            >
-              Save Farm Profile
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={saveFarmProfile}
+                className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold rounded-xl text-xs shadow-md transition-all"
+              >
+                Save Farm Profile
+              </button>
+              {farmSaved && (
+                <span className="flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 size={14} /> Saved ✓
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Active Crop Parameters */}

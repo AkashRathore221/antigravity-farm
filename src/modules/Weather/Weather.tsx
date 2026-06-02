@@ -173,18 +173,6 @@ export const Weather: React.FC = () => {
   }, []);
 
   const captureGpsLocation = () => {
-    // Priority 1: precise saved farm coordinates beat the phone's GPS.
-    const fp = settings.farmProfile;
-    if (typeof fp?.farmLat === 'number' && typeof fp?.farmLng === 'number' && (fp.farmLat !== 0 || fp.farmLng !== 0)) {
-      const lat = fp.farmLat, lon = fp.farmLng;
-      activeCoordsRef.current = { lat, lon };
-      setActiveCoords({ lat, lon });
-      setHasCoords(true);
-      setLocationName(`Farm: ${lat}° N, ${lon}° E`);
-      setSearchQuery(`Farm: ${lat}° N, ${lon}° E`);
-      fetchWeather(lat, lon);
-      return;
-    }
     if (!navigator.geolocation) {
       alert('Geolocation is not supported by your browser.');
       return;
@@ -274,10 +262,9 @@ export const Weather: React.FC = () => {
   const vpdInfo = todayWeather ? vpdStatus(todayWeather.vpd) : null;
 
   // Auto-fetch on mount + 30-min refresh interval. Location priority:
-  // 1) saved farm coordinates, 2) device GPS, 3) farmCity geocoding, 4) none.
+  // 1) device GPS, 2) farmCity geocoding, 3) none.
   useEffect(() => {
     const fp = settings.farmProfile;
-    const hasFarmCoords = typeof fp?.farmLat === 'number' && typeof fp?.farmLng === 'number' && (fp.farmLat !== 0 || fp.farmLng !== 0);
 
     const useCityFallback = () => {
       const city = fp?.farmCity;
@@ -291,15 +278,7 @@ export const Weather: React.FC = () => {
         .catch(() => { /* silent */ });
     };
 
-    if (hasFarmCoords) {
-      const lat = fp!.farmLat as number, lon = fp!.farmLng as number;
-      activeCoordsRef.current = { lat, lon };
-      setActiveCoords({ lat, lon });
-      setHasCoords(true);
-      setLocationName(`Farm: ${lat}° N, ${lon}° E`);
-      setSearchQuery(`Farm: ${lat}° N, ${lon}° E`);
-      fetchWeather(lat, lon);
-    } else if (navigator.geolocation) {
+    if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const lat = parseFloat(pos.coords.latitude.toFixed(4));
