@@ -203,6 +203,11 @@ function queueEntryIdFor(queue: SyncQueueItem[], table: SyncQueueItem['table'], 
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Names of the demo inventory items seeded by mockData for anonymous visitors.
+// Used by pullFromSupabase to strip these rows if they leaked into an
+// authenticated user's local state (see the cleanup there).
+const MOCK_INVENTORY_NAMES = new Set(mockInventory.map(i => i.name));
+
 // Enforce the "at most one active crop" invariant on a crop array.
 // When a corrupted backup or stale hydration produces more than one,
 // keep the most recently created as active and archive the rest with
@@ -558,11 +563,29 @@ export const useAppStore = create<AppState>((set, get) => ({
         const mergedExpenses    = mergeTable('expenses',     local.expenses,    data.expenses);
         const mergedWeatherLogs = mergeTable('weather_logs', local.weatherLogs, data.weatherLogs);
 
+        // One-time cleanup — strip leaked demo/mock inventory. These rows are
+        // seeded for anonymous visitors (mock names + non-UUID ids like 'inv-1')
+        // and can linger in localStorage after login; the union merge above
+        // would otherwise keep them forever since their ids aren't in the cloud.
+        // Remove an item ONLY when its name matches a known mock item AND its id
+        // is absent from the cloud AND its id is not a real UUID. Real user items
+        // always have UUID ids, so this can never delete a genuine item — even
+        // one that happens to share a mock name. Runs only when the inventory
+        // read succeeded, so the "absent from cloud" check is trustworthy.
+        const cleanedInventory = data.inventory.ok
+          ? mergedInventory.filter(item => {
+              const inCloud = data.inventory.rows.some(r => r.id === item.id);
+              const isLeakedMock = MOCK_INVENTORY_NAMES.has(item.name) && !inCloud && !UUID_RE.test(item.id);
+              if (isLeakedMock) console.warn(`[Migration] Removing leaked mock inventory item: "${item.name}" (${item.id})`);
+              return !isLeakedMock;
+            })
+          : mergedInventory;
+
         const normalizedCrops = normalizeActiveCrops(mergedCrops);
         const activeCropId = normalizedCrops.find(c => c.status === 'active')?.id ?? null;
         set({
           crops: normalizedCrops,
-          inventory: mergedInventory,
+          inventory: cleanedInventory,
           usageLogs: mergedUsageLogs,
           harvests: mergedHarvests,
           expenses: mergedExpenses,
