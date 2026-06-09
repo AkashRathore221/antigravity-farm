@@ -75,6 +75,7 @@ const TABLE_COLUMNS: Record<string, ReadonlyArray<string>> = {
   harvests:     ['id', 'user_id', 'crop_id', 'date', 'weight_total', 'weight_grade_a', 'weight_grade_b', 'weight_grade_c', 'wastage', 'buyer_name', 'mandi_rate', 'sale_rate', 'revenue', 'notes', 'image_url', 'created_at'],
   expenses:     ['id', 'user_id', 'crop_id', 'date', 'category', 'amount', 'notes', 'created_at'],
   weather_logs: ['id', 'user_id', 'date', 'temp', 'humidity', 'rainfall', 'wind', 'aqi', 'uv_index', 'sunrise', 'sunset', 'vpd', 'dew_point', 'temp_min', 'temp_max', 'created_at'],
+  photo_journal: ['id', 'user_id', 'storage_path', 'public_url', 'caption', 'category', 'photo_date', 'crop_id', 'created_at', 'updated_at'],
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

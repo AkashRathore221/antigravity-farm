@@ -3,7 +3,7 @@ import { useAppStore } from '../store/useAppStore';
 import {
   LayoutDashboard, Sprout, Boxes, ClipboardList, TrendingUp,
   Receipt, CloudSun, BarChart3, FileSpreadsheet, BookOpen,
-  Settings, Wifi, WifiOff, RefreshCw, Menu, X, LogOut, User
+  Settings, Wifi, WifiOff, RefreshCw, Menu, X, LogOut, User, Camera
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -39,6 +39,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
     { id: 'harvest', label: 'Harvest & Sales', icon: TrendingUp, enabled: settings.modules.harvest },
     { id: 'expenses', label: 'Expenses Ledger', icon: Receipt, enabled: settings.modules.expenses },
     { id: 'weather', label: 'Weather Center', icon: CloudSun, enabled: settings.modules.weather },
+    { id: 'photos', label: 'Photos', icon: Camera, enabled: true },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, enabled: settings.modules.analytics },
     { id: 'reports', label: 'Reports & Export', icon: FileSpreadsheet, enabled: settings.modules.reports },
     { id: 'reference', label: 'Agri Reference', icon: BookOpen, enabled: settings.modules.reference },

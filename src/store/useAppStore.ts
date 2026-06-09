@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
-  Crop, InventoryItem, UsageLog, Harvest, Expense, WeatherLog, AppSettings, SyncQueueItem
+  Crop, InventoryItem, UsageLog, Harvest, Expense, WeatherLog, AppSettings, SyncQueueItem,
+  PhotoJournalEntry, PhotoCategory
 } from '../db/types';
 import {
   mockCrops, mockInventory, mockUsageLogs, mockHarvests, mockExpenses, mockWeatherLogs, defaultSettings
@@ -22,6 +23,7 @@ interface AppState {
   harvests: Harvest[];
   expenses: Expense[];
   weatherLogs: WeatherLog[];
+  photoJournal: PhotoJournalEntry[];
   settings: AppSettings;
   syncQueue: SyncQueueItem[];
   isOnline: boolean;
@@ -71,6 +73,10 @@ interface AppState {
   // Weather
   addWeatherLog: (weatherData: Omit<WeatherLog, 'id' | 'tenant_id' | 'created_at'>) => void;
   deleteWeatherLog: (id: string) => void;
+
+  // Photo Journal (uploaded directly to Supabase — NOT queued / NOT in localStorage)
+  addPhoto: (file: File, meta: { caption: string; category: PhotoCategory; photo_date: string; crop_id: string | null }) => Promise<{ ok: boolean; error?: string }>;
+  deletePhoto: (id: string) => Promise<void>;
 
   // Settings
   updateSettings: (updates: Partial<AppSettings>) => void;
@@ -388,6 +394,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   harvests: [],
   expenses: [],
   weatherLogs: [],
+  photoJournal: [],
   settings: defaultSettings,
   syncQueue: [],
   isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
@@ -504,7 +511,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       authUser: null,
       crops: [], inventory: [], usageLogs: [], harvests: [],
-      expenses: [], weatherLogs: [], activeCropId: null, syncQueue: [],
+      expenses: [], weatherLogs: [], photoJournal: [], activeCropId: null, syncQueue: [],
       settings: defaultSettings,
     });
   },
@@ -593,6 +600,22 @@ export const useAppStore = create<AppState>((set, get) => ({
           activeCropId,
         });
         saveLocal(get());
+
+        // Photo journal — fetched independently (not queued, not in localStorage).
+        // Cloud is authoritative: replace the in-memory list on a successful read,
+        // leave it untouched on failure so a transient error doesn't blank photos.
+        try {
+          const photoRes = await supabase
+            .from('photo_journal')
+            .select('*')
+            .eq('user_id', authUser.id)
+            .order('photo_date', { ascending: false });
+          if (!photoRes.error) {
+            set({ photoJournal: (photoRes.data as PhotoJournalEntry[]) ?? [] });
+          }
+        } catch (e) {
+          console.error('[Sync] photo_journal pull failed:', e);
+        }
 
         // Step 4 — repair true orphans (crop_id in NO crop). Reassign to the
         // active crop, persist, and queue + optimistically push the fixes.
@@ -730,7 +753,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setOnlineStatus: (status) => set({ isOnline: status }),
 
   resetAllData: () => {
-    set({ crops: [], inventory: [], usageLogs: [], harvests: [], expenses: [], weatherLogs: [], settings: defaultSettings, syncQueue: [], activeCropId: null });
+    set({ crops: [], inventory: [], usageLogs: [], harvests: [], expenses: [], weatherLogs: [], photoJournal: [], settings: defaultSettings, syncQueue: [], activeCropId: null });
     localStorage.removeItem(LS_KEY);
   },
 
@@ -1097,6 +1120,63 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ weatherLogs: updated, syncQueue: newQueue });
     saveLocal(get());
     bgDelete('weather_logs', id, authUser?.id, queueEntryIdFor(newQueue, 'weather_logs', id));
+  },
+
+  // ── Photo Journal ────────────────────────────────────────────────────────────
+  // Photos upload straight to Supabase Storage + the photo_journal table. They
+  // are NOT queued and NOT persisted to localStorage (binary files would blow
+  // the LS quota). Cloud is the single source of truth; pullFromSupabase
+  // replaces photoJournal wholesale.
+  addPhoto: async (file, meta) => {
+    const user = get().authUser;
+    if (!user) return { ok: false, error: 'Not logged in' };
+
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
+    const fileName = `${meta.photo_date}-${crypto.randomUUID()}.${ext}`;
+    const storagePath = `${user.id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('farm-photos')
+      .upload(storagePath, file, { upsert: false });
+    if (uploadError) return { ok: false, error: uploadError.message };
+
+    const { data: urlData } = supabase.storage.from('farm-photos').getPublicUrl(storagePath);
+    const publicUrl = urlData.publicUrl;
+
+    const entry: PhotoJournalEntry = {
+      id: crypto.randomUUID(),
+      user_id: user.id,
+      storage_path: storagePath,
+      public_url: publicUrl,
+      caption: meta.caption.trim(),
+      category: meta.category,
+      photo_date: meta.photo_date,
+      crop_id: meta.crop_id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error: dbError } = await supabase.from('photo_journal').insert(entry);
+    if (dbError) {
+      // Roll back the orphaned storage object so we don't leak files.
+      await supabase.storage.from('farm-photos').remove([storagePath]);
+      return { ok: false, error: dbError.message };
+    }
+
+    set(state => ({ photoJournal: [entry, ...state.photoJournal] }));
+    return { ok: true };
+  },
+
+  deletePhoto: async (id) => {
+    const user = get().authUser;
+    if (!user) return;
+    const entry = get().photoJournal.find(p => p.id === id);
+    if (!entry) return;
+
+    await supabase.from('photo_journal').delete().eq('id', id).eq('user_id', user.id);
+    await supabase.storage.from('farm-photos').remove([entry.storage_path]);
+
+    set(state => ({ photoJournal: state.photoJournal.filter(p => p.id !== id) }));
   },
 
   // ── Settings ─────────────────────────────────────────────────────────────────

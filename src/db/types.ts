@@ -161,3 +161,45 @@ export interface SyncQueueItem {
   data: Crop | InventoryItem | UsageLog | Harvest | Expense | WeatherLog | { id: string };
   timestamp: string;
 }
+
+// ─── Photo Journal ───────────────────────────────────────────────────────────
+export interface PhotoJournalEntry {
+  id: string;
+  user_id: string;
+  storage_path: string;
+  public_url: string;
+  caption: string;
+  category: PhotoCategory;
+  photo_date: string;
+  crop_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PhotoCategory =
+  | 'Crop Growth'
+  | 'Harvest'
+  | 'Pest/Disease'
+  | 'Irrigation'
+  | 'Fertigation'
+  | 'Weather Damage'
+  | 'Inventory/Inputs'
+  | 'Infrastructure'
+  | 'General/Other';
+
+export const PHOTO_CATEGORIES: PhotoCategory[] = [
+  'Crop Growth','Harvest','Pest/Disease','Irrigation','Fertigation',
+  'Weather Damage','Inventory/Inputs','Infrastructure','General/Other',
+];
+
+export const PHOTO_CATEGORY_EMOJI: Record<PhotoCategory, string> = {
+  'Crop Growth': '🌱',
+  'Harvest': '🥒',
+  'Pest/Disease': '🐛',
+  'Irrigation': '💧',
+  'Fertigation': '🧪',
+  'Weather Damage': '🌦️',
+  'Inventory/Inputs': '📦',
+  'Infrastructure': '🏗️',
+  'General/Other': '📋',
+};

@@ -17,6 +17,7 @@ import { Analytics } from './modules/Analytics/Analytics';
 import { Reports } from './modules/Reports/Reports';
 import { Reference } from './modules/Reference/Reference';
 import { Settings } from './modules/Settings/Settings';
+import { PhotoJournal } from './modules/PhotoJournal/PhotoJournal';
 
 const PasswordResetModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [pw, setPw] = useState('');
@@ -234,6 +235,7 @@ function App() {
       case 'harvest':       return <Harvest />;
       case 'expenses':      return <Expenses />;
       case 'weather':       return <Weather />;
+      case 'photos':        return <PhotoJournal />;
       case 'analytics':     return <Analytics />;
       case 'reports':       return <Reports />;
       case 'reference':     return <Reference />;
